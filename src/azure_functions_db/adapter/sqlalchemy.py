@@ -13,6 +13,7 @@ from sqlalchemy.sql import and_, literal_column, or_, select, text
 
 from ..core.config import DbConfig, resolve_env_vars
 from ..core.engine import EngineProvider
+from ..core.errors import ConfigurationError
 from ..core.types import CursorValue, RawRecord, SourceDescriptor
 from ..trigger.errors import FetchError, SourceConfigurationError
 
@@ -20,7 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_env_vars(value: str) -> str:
-    return resolve_env_vars(value)
+    try:
+        return resolve_env_vars(value)
+    except ConfigurationError as exc:
+        raise SourceConfigurationError(str(exc)) from exc
 
 
 class SqlAlchemySource:

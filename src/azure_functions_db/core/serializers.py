@@ -21,12 +21,22 @@ def serialize_cursor_part(value: object) -> CursorPart:
     raise TypeError(msg)
 
 
+def _is_valid_cursor_part(value: object) -> bool:
+    return isinstance(value, (str, int, float, bool)) or value is None
+
+
 def parse_checkpoint_cursor(raw: object) -> CursorValue | None:
     if raw is None or isinstance(raw, (str, int, float, bool)):
         return raw
-    if isinstance(raw, tuple):
-        return raw
-    if isinstance(raw, list):
-        return tuple(raw)
+    if isinstance(raw, (tuple, list)):
+        parts = tuple(raw)
+        for i, part in enumerate(parts):
+            if not _is_valid_cursor_part(part):
+                msg = (
+                    f"Unsupported cursor part type at index {i}: "
+                    f"{type(part).__name__}"
+                )
+                raise CursorSerializationError(msg)
+        return parts
     msg = f"Unsupported cursor type in checkpoint: {type(raw).__name__}"
     raise CursorSerializationError(msg)

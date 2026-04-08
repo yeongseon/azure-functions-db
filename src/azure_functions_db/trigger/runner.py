@@ -9,6 +9,7 @@ import time
 from typing import Any, Protocol, runtime_checkable
 import uuid
 
+from ..core.errors import CursorSerializationError
 from ..core.serializers import parse_checkpoint_cursor
 from ..core.types import CursorValue, RawRecord, SourceDescriptor
 from ..observability import (
@@ -74,7 +75,12 @@ def _detect_handler_arity(handler: Callable[..., Any]) -> int:
 
 
 def _extract_cursor(checkpoint: dict[str, object]) -> CursorValue | None:
-    return parse_checkpoint_cursor(checkpoint.get("cursor"))
+    try:
+        return parse_checkpoint_cursor(checkpoint.get("cursor"))
+    except CursorSerializationError as exc:
+        from .errors import SerializationError
+
+        raise SerializationError(str(exc)) from exc
 
 
 class PollRunner:

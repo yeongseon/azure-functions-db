@@ -171,6 +171,18 @@ class TestSerializers:
         with pytest.raises(CursorSerializationError, match="Unsupported cursor type"):
             parse_checkpoint_cursor({"cursor": 1})
 
+    def test_parse_checkpoint_cursor_rejects_invalid_composite_member(self) -> None:
+        with pytest.raises(
+            CursorSerializationError, match="Unsupported cursor part type at index 0"
+        ):
+            parse_checkpoint_cursor([{"bad": 1}, 2])
+
+    def test_parse_checkpoint_cursor_rejects_nested_list(self) -> None:
+        with pytest.raises(
+            CursorSerializationError, match="Unsupported cursor part type at index 1"
+        ):
+            parse_checkpoint_cursor([1, [2, 3]])
+
 
 class TestSharedTypes:
     def test_aliases_exist(self) -> None:
