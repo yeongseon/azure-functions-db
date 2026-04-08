@@ -289,7 +289,7 @@ class TestDbWriterUpsertMany:
     def test_upsert_many_rollback_on_failure(self, users_url: str) -> None:
         with DbWriter(url=users_url, table="users") as writer:
             writer.insert(data={"id": 1, "name": "Keep", "email": "k@k.com"})
-            with pytest.raises(WriteError, match="Failed to upsert rows"):
+            with pytest.raises(ConfigurationError, match="Unknown columns in data"):
                 writer.upsert_many(
                     rows=[
                         {"id": 2, "name": "OK", "email": "ok@ok.com"},
