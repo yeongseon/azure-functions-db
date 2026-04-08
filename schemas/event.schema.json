@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "azure-functions-db RowChange",
+  "type": "object",
+  "required": [
+    "event_id",
+    "op",
+    "source",
+    "cursor",
+    "pk",
+    "metadata"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "insert",
+        "update",
+        "delete",
+        "unknown"
+      ]
+    },
+    "source": {
+      "type": "object"
+    },
+    "cursor": {
+      "type": "object"
+    },
+    "pk": {
+      "type": "object"
+    },
+    "before": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "after": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

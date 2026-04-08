@@ -1,0 +1,6 @@
+azure-functions>=1.22.0
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+azure-storage-blob>=12.21.0
+pydantic>=2.7
+tenacity>=9.0.0

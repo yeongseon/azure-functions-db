@@ -1,0 +1,21 @@
+[project]
+name = "azure-functions-db"
+version = "0.1.0"
+description = "Pseudo DB trigger framework for Azure Functions Python"
+requires-python = ">=3.11"
+dependencies = [
+  "azure-functions>=1.22.0",
+  "sqlalchemy>=2.0",
+  "azure-storage-blob>=12.21.0",
+  "pydantic>=2.7",
+  "tenacity>=9.0.0",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+mysql = ["pymysql>=1.1"]
+mssql = ["pyodbc>=5.1"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

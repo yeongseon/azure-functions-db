@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "azure-functions-db Poller Config",
+  "type": "object",
+  "required": [
+    "name",
+    "source",
+    "checkpoint_store"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 100
+    },
+    "max_batches_per_tick": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "kind",
+        "cursor_column",
+        "pk_columns"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "sqlalchemy",
+            "mongo",
+            "outbox"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "cursor_column": {
+          "type": "string"
+        },
+        "pk_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "cursor",
+            "outbox",
+            "cdc"
+          ],
+          "default": "cursor"
+        }
+      },
+      "additionalProperties": true
+    },
+    "checkpoint_store": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "blob",
+            "table",
+            "cosmos"
+          ]
+        },
+        "connection": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
