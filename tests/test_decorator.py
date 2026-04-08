@@ -238,11 +238,8 @@ def test_db_output_injects_writer(tmp_path: Path) -> None:
     engine = create_engine(url)
     try:
         with engine.connect() as conn:
-            rows = (
-                conn.execute(text("SELECT id, status FROM processed_orders ORDER BY id"))
-                .mappings()
-                .all()
-            )
+            result = conn.execute(text("SELECT id, status FROM processed_orders ORDER BY id"))
+            rows = [dict(row._mapping) for row in result]
     finally:
         engine.dispose()
 
