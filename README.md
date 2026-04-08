@@ -162,6 +162,10 @@ trigger = PollTrigger(
 - **At-least-once** — default delivery guarantee with idempotency support ([ADR-004](docs/19-ADR-004-at-least-once-default.md))
 - **Unified package** — trigger + binding in one package ([ADR-005](docs/23-ADR-005-unified-package-design.md))
 
+## Duplicate Handling
+
+This package provides **at-least-once** delivery. Duplicates may occur during process crashes, lease transitions, or commit failures. Handlers must be idempotent. See [Semantics — Duplicate Windows](docs/03-semantics.md#13-duplicate-and-reprocessing-windows) for details.
+
 ## Documentation
 
 - Full docs: [yeongseon.github.io/azure-functions-db](https://yeongseon.github.io/azure-functions-db/)
