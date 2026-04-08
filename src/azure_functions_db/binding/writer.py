@@ -366,17 +366,36 @@ class DbWriter:
 
         dialect = self._engine.dialect.name
         if dialect == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            return self._build_pg_upsert(data, conflict_columns, update_columns)
+        return self._build_sqlite_upsert(data, conflict_columns, update_columns)
 
-            stmt = pg_insert(self._table).values(**data)
-            if update_columns:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=conflict_columns,
-                    set_={col: stmt.excluded[col] for col in update_columns},
-                )
-            else:
-                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_columns)
-            return stmt
+    def _build_pg_upsert(
+        self,
+        data: dict[str, object],
+        conflict_columns: list[str],
+        update_columns: dict[str, object],
+    ) -> Any:
+        assert self._table is not None  # noqa: S101  # nosec B101
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(self._table).values(**data)
+        if update_columns:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=conflict_columns,
+                set_={col: stmt.excluded[col] for col in update_columns},
+            )
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=conflict_columns)
+        return stmt
+
+    def _build_sqlite_upsert(
+        self,
+        data: dict[str, object],
+        conflict_columns: list[str],
+        update_columns: dict[str, object],
+    ) -> Any:
+        assert self._table is not None  # noqa: S101  # nosec B101
 
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
