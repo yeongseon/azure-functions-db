@@ -79,15 +79,14 @@ class PollTrigger:
         *,
         name: str,
         source: SourceAdapter,
-        checkpoint_store: CheckpointStore,
+        checkpoint_store: StateStore,
         batch_size: int = 100,
         max_batches_per_tick: int = 1,
         lease_ttl_seconds: int = 120,
-        heartbeat_interval_seconds: int = 20,
         retry_policy: RetryPolicy | None = None,
-        quarantine: QuarantineSink | None = None,
-        serializer: EventSerializer | None = None,
     ): ...
+
+    def run(self, *, timer: object, handler: Callable[..., Any]) -> int: ...
 ```
 
 ### 3.2 SqlAlchemySource
@@ -144,9 +143,10 @@ Supported signatures:
 ```python
 def handler(events): ...
 def handler(events, context): ...
-async def handler(events): ...
-async def handler(events, context): ...
 ```
+
+> **Note**: Async handlers are not supported and will raise `TypeError`.
+> Async support may be added in a future version.
 
 Rules:
 - `events` may be empty. Default behavior is **empty batch skip**.
@@ -177,7 +177,6 @@ Rules:
 - `batch_size=100`
 - `max_batches_per_tick=1`
 - `lease_ttl_seconds=120`
-- `heartbeat_interval_seconds=20`
 - `use_monitor=True`
 - `schedule=0 */1 * * * *` (every 1 minute)
 

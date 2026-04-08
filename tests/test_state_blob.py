@@ -111,7 +111,7 @@ def _make_store(
 ) -> tuple[BlobCheckpointStore, _FakeContainerClient]:
     container = container or _FakeContainerClient()
     store = BlobCheckpointStore(
-        container_client=container,  # type: ignore[arg-type]
+        container_client=container,
         source_fingerprint=fingerprint,
     )
     return store, container
