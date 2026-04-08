@@ -1,69 +1,173 @@
-# azure-functions-db 문서 패키지
+# Azure Functions DB
 
-`azure-functions-db`는 **Azure Functions Python 앱 위에서 동작하는 SQLAlchemy 스타일 pseudo DB trigger 프레임워크**를 목표로 하는 프로젝트다.
+[![PyPI](https://img.shields.io/pypi/v/azure-functions-db.svg)](https://pypi.org/project/azure-functions-db/)
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://pypi.org/project/azure-functions-db/)
+[![CI](https://github.com/yeongseon/azure-functions-db/actions/workflows/ci-test.yml/badge.svg)](https://github.com/yeongseon/azure-functions-db/actions/workflows/ci-test.yml)
+[![Release](https://github.com/yeongseon/azure-functions-db/actions/workflows/publish-pypi.yml/badge.svg)](https://github.com/yeongseon/azure-functions-db/actions/workflows/publish-pypi.yml)
+[![codecov](https://codecov.io/gh/yeongseon/azure-functions-db/branch/main/graph/badge.svg)](https://codecov.io/gh/yeongseon/azure-functions-db)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
+[![Docs](https://img.shields.io/badge/docs-gh--pages-blue)](https://yeongseon.github.io/azure-functions-db/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-핵심 아이디어는 단순하다.
+Unified database integration for **Azure Functions Python v2** — change detection (trigger via polling), input binding (DbReader), and output binding (DbWriter) in a single package using SQLAlchemy.
 
-- Azure Functions의 **native timer trigger**를 실행 기반으로 사용한다.
-- DB 변경 감지는 라이브러리의 **poll / CDC adapter / outbox 전략**이 담당한다.
-- 사용자는 이를 `trigger-like` API로 사용한다.
-- 여러 RDBMS는 SQLAlchemy dialect/driver 생태계를 최대한 활용한다.
-- 운영상 중요한 상태는 checkpoint / lease / dedup 계층이 책임진다.
+---
 
-이 패키지에는 실제 개발에 바로 들어갈 수 있게 다음 문서가 포함되어 있다.
+Part of the **Azure Functions Python DX Toolkit**
+→ Bring FastAPI-like developer experience to Azure Functions
 
-## 문서 인덱스
+## Why this exists
 
-- `docs/00-프로젝트-개요.md`
-- `docs/01-PRD.md`
-- `docs/02-아키텍처.md`
-- `docs/03-의미론-semantics.md`
-- `docs/04-Python-API-스펙.md`
-- `docs/05-Adapter-SDK.md`
-- `docs/06-Checkpoint-Lease-스펙.md`
-- `docs/07-이벤트-모델.md`
-- `docs/08-레포-구조.md`
-- `docs/09-로컬-개발-가이드.md`
-- `docs/10-테스트-전략.md`
-- `docs/11-운영-관측성.md`
-- `docs/12-보안-설정.md`
-- `docs/13-배포-가이드.md`
-- `docs/14-로드맵.md`
-- `docs/15-CONTRIBUTING.md`
-- `docs/16-ADR-001-네이티브-트리거-대신-pseudo-trigger.md`
-- `docs/17-ADR-002-SQLAlchemy-중심-adapter.md`
-- `docs/18-ADR-003-Blob-checkpoint-MVP.md`
-- `docs/19-ADR-004-at-least-once-기본-보장.md`
-- `docs/20-오픈-이슈.md`
-- `docs/21-개발-체크리스트.md`
-- `docs/99-레퍼런스.md`
+Azure Functions Python v2 has no built-in database integration story:
 
-## 예제 파일
+- **No DB trigger** — unlike Cosmos DB, there is no native trigger for relational databases
+- **No input/output bindings** — no declarative way to read or write DB rows from a function
+- **Driver confusion** — each database requires different drivers, connection strings, and setup
+- **No change detection** — polling, CDC, or outbox patterns must be built from scratch every time
 
-- `examples/function_app.py`
-- `examples/usage_postgres.py`
-- `examples/host.json`
-- `examples/local.settings.sample.json`
-- `examples/requirements.txt`
-- `examples/pyproject.toml`
+## What it does
 
-## JSON Schema
+- **Pseudo DB trigger** — poll-based change detection with checkpoint, lease, and at-least-once delivery
+- **DbReader** — input binding for reading rows from any supported database
+- **DbWriter** — output binding for writing rows with automatic batching
+- **Multi-DB support** — PostgreSQL, MySQL, and SQL Server via SQLAlchemy dialects
+- **Single `pip install`** — one package with optional extras for each database driver
 
-- `schemas/poller-config.schema.json`
-- `schemas/event.schema.json`
+## Installation
 
-## 추천 읽는 순서
+```bash
+# Core package (pick your database)
+pip install azure-functions-db[postgres]
+pip install azure-functions-db[mysql]
+pip install azure-functions-db[mssql]
 
-1. 프로젝트 개요
-2. PRD
-3. 아키텍처
-4. semantics
-5. Python API 스펙
-6. Checkpoint/Lease 스펙
-7. 테스트/운영/배포 문서
+# Multiple databases
+pip install azure-functions-db[postgres,mysql]
 
-## 한 줄 결론
+# All drivers
+pip install azure-functions-db[all]
+```
 
-이 프로젝트는 **진짜 Azure Functions custom trigger**를 DB마다 새로 만드는 것이 아니라,
-**Timer + checkpoint + adapter + SQLAlchemy dialect**를 조합해
-실무적으로 신뢰할 수 있는 `pseudo trigger experience`를 제공하는 것이 목표다.
+Your Function App dependencies should include:
+
+```text
+azure-functions
+azure-functions-db[postgres]
+```
+
+## Quick Start
+
+### Trigger (change detection)
+
+```python
+import azure.functions as func
+from azure_functions_db import PollTrigger
+
+app = func.FunctionApp()
+trigger = PollTrigger(
+    connection_string="postgresql+psycopg://user:pass@host/db",
+    table="orders",
+    tracking_column="updated_at",
+)
+
+
+@app.timer_trigger(schedule="*/30 * * * * *", arg_name="timer")
+def detect_changes(timer: func.TimerRequest) -> None:
+    for change in trigger.poll():
+        process_order(change)
+```
+
+### Input Binding (DbReader)
+
+```python
+from azure_functions_db import DbReader
+
+reader = DbReader(
+    connection_string="postgresql+psycopg://user:pass@host/db",
+    table="products",
+)
+
+
+@app.route(route="products/{id}", methods=["GET"])
+def get_product(req: func.HttpRequest) -> func.HttpResponse:
+    product = reader.read(id=req.route_params["id"])
+    return func.HttpResponse(json.dumps(product), mimetype="application/json")
+```
+
+### Output Binding (DbWriter)
+
+```python
+from azure_functions_db import DbWriter
+
+writer = DbWriter(
+    connection_string="postgresql+psycopg://user:pass@host/db",
+    table="audit_logs",
+)
+
+
+@app.route(route="orders", methods=["POST"])
+def create_order(req: func.HttpRequest) -> func.HttpResponse:
+    order = req.get_json()
+    writer.write({"action": "order_created", "payload": order})
+    return func.HttpResponse(status_code=201)
+```
+
+## Supported Databases
+
+| Database | Extra | Driver |
+|----------|-------|--------|
+| PostgreSQL | `azure-functions-db[postgres]` | [psycopg](https://www.psycopg.org/) |
+| MySQL | `azure-functions-db[mysql]` | [PyMySQL](https://pymysql.readthedocs.io/) |
+| SQL Server | `azure-functions-db[mssql]` | [pyodbc](https://github.com/mkleehammer/pyodbc) |
+
+## Scope
+
+- Azure Functions Python **v2 programming model**
+- Timer-triggered functions for change detection
+- HTTP/Queue/Event-triggered functions for read/write bindings
+- SQLAlchemy 2.0+ for database abstraction
+- Checkpoint storage via Azure Blob Storage
+
+This package does **not** implement a native Azure Functions trigger extension. It uses a poll-based approach on top of the existing timer trigger.
+
+## Key Design Decisions
+
+- **Pseudo trigger** — timer-based polling instead of native C# extension ([ADR-001](docs/16-ADR-001-pseudo-trigger-over-native.md))
+- **SQLAlchemy-centric** — single ORM layer for all databases ([ADR-002](docs/17-ADR-002-sqlalchemy-centric-adapter.md))
+- **Blob checkpoint** — Azure Blob Storage for checkpoint persistence ([ADR-003](docs/18-ADR-003-blob-checkpoint-mvp.md))
+- **At-least-once** — default delivery guarantee with idempotency support ([ADR-004](docs/19-ADR-004-at-least-once-default.md))
+- **Unified package** — trigger + binding in one package ([ADR-005](docs/23-ADR-005-unified-package-design.md))
+
+## Documentation
+
+- Full docs: [yeongseon.github.io/azure-functions-db](https://yeongseon.github.io/azure-functions-db/)
+- Examples: `examples/`
+- [Architecture](docs/02-architecture.md)
+- [Semantics](docs/03-semantics.md)
+- [Python API Spec](docs/04-python-api-spec.md)
+- [Adapter SDK](docs/05-adapter-sdk.md)
+
+## Ecosystem
+
+Part of the **Azure Functions Python DX Toolkit**:
+
+| Package | Role |
+|---------|------|
+| [azure-functions-openapi](https://github.com/yeongseon/azure-functions-openapi) | OpenAPI spec and Swagger UI |
+| [azure-functions-validation](https://github.com/yeongseon/azure-functions-validation) | Request and response validation |
+| **azure-functions-db** | Database trigger and bindings |
+| [azure-functions-logging](https://github.com/yeongseon/azure-functions-logging) | Structured logging and observability |
+| [azure-functions-doctor](https://github.com/yeongseon/azure-functions-doctor) | Pre-deploy diagnostic CLI |
+| [azure-functions-scaffold](https://github.com/yeongseon/azure-functions-scaffold) | Project scaffolding |
+| [azure-functions-python-cookbook](https://github.com/yeongseon/azure-functions-python-cookbook) | Recipes and examples |
+
+## Disclaimer
+
+This project is an independent community project and is not affiliated with,
+endorsed by, or maintained by Microsoft.
+
+Azure and Azure Functions are trademarks of Microsoft Corporation.
+
+## License
+
+MIT

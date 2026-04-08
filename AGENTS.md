@@ -6,8 +6,8 @@
 ## Read First
 - `README.md`
 - `CONTRIBUTING.md`
-- `docs/02-아키텍처.md`
-- `docs/03-의미론-semantics.md`
+- `docs/02-architecture.md`
+- `docs/03-semantics.md`
 
 ## Working Rules
 - Preserve the package's Python compatibility and public API behavior unless the change explicitly updates the contract.

@@ -39,6 +39,11 @@ Issues = "https://github.com/yeongseon/azure-functions-db/issues"
 postgres = ["psycopg[binary]>=3.1"]
 mysql = ["pymysql>=1.1"]
 mssql = ["pyodbc>=5.1"]
+all = [
+    "psycopg[binary]>=3.1",
+    "pymysql>=1.1",
+    "pyodbc>=5.1",
+]
 dev = [
     "bandit==1.9.4",
     "build",

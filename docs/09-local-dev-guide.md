@@ -1,15 +1,15 @@
-# 로컬 개발 가이드
+# Local Development Guide
 
-## 1. 개발 환경
+## 1. Development Environment
 
-권장:
+Recommended:
 - Python 3.11+
 - Azure Functions Core Tools 4.x
-- Docker (DB integration test용)
-- Azure Storage Emulator 대체로 Azurite 또는 실제 dev storage
-- uv 또는 pip + venv
+- Docker (for DB integration tests)
+- Azurite or an actual dev storage account as an alternative to Azure Storage Emulator
+- uv or pip + venv
 
-## 2. Azure Functions Python v2 앱 생성
+## 2. Creating an Azure Functions Python v2 App
 
 ```bash
 func init myfuncapp --python
@@ -17,9 +17,9 @@ cd myfuncapp
 func new --name orders_poll --template "Timer trigger"
 ```
 
-이후 Python v2 구조에 맞게 `function_app.py` 중심으로 정리한다.
+Afterwards, organize the project around `function_app.py` following the Python v2 structure.
 
-## 3. 의존성 설치
+## 3. Installing Dependencies
 
 ```bash
 python -m venv .venv
@@ -27,9 +27,9 @@ source .venv/bin/activate
 pip install -r examples/requirements.txt
 ```
 
-## 4. host.json 확인
+## 4. Checking host.json
 
-`host.json`에 extension bundle 4.x 범위를 유지한다.
+Keep the extension bundle 4.x range in `host.json`.
 
 ```json
 {
@@ -43,7 +43,7 @@ pip install -r examples/requirements.txt
 
 ## 5. local.settings.json
 
-예시:
+Example:
 
 ```json
 {
@@ -56,29 +56,29 @@ pip install -r examples/requirements.txt
 }
 ```
 
-## 6. 로컬 실행
+## 6. Running Locally
 
 ```bash
 func start
 ```
 
-## 7. 권장 로컬 테스트 순서
+## 7. Recommended Local Test Sequence
 
-1. pure unit test
+1. Pure unit tests
 2. SQLite smoke test
 3. Docker Postgres integration test
 4. Docker MySQL integration test
 5. Docker SQL Server integration test
-6. local Functions runtime smoke test
+6. Local Functions runtime smoke test
 
-## 8. 개발용 샘플 DB
+## 8. Sample DB for Development
 
 ### PostgreSQL
 - table: orders
 - cursor: updated_at
 - pk: id
 
-### seed 예시
+### Seed Example
 ```sql
 CREATE TABLE orders (
   id BIGSERIAL PRIMARY KEY,
@@ -92,18 +92,18 @@ INSERT INTO orders (status, total_amount) VALUES
 ('paid', 20.00);
 ```
 
-## 9. 로컬 디버깅 포인트
+## 9. Local Debugging Checkpoints
 
-- checkpoint JSON 내용
+- checkpoint JSON contents
 - generated SQL
 - fetched batch size
 - lease owner / fencing token
-- handler 실행 시간
-- commit 성공 여부
+- handler execution time
+- commit success status
 
-## 10. 주의사항
+## 10. Caveats
 
-- `updated_at`는 app이 확실히 갱신해야 한다.
-- local clock와 DB timezone 혼용 금지.
-- empty batch는 성공 케이스다.
-- hard delete는 기본 polling에서 안 잡힌다.
+- `updated_at` must be reliably updated by the application.
+- Do not mix local clock and DB timezone.
+- An empty batch is a success case.
+- Hard deletes are not captured by default polling.

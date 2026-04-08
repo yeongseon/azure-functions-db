@@ -1,4 +1,4 @@
-# 로드맵
+# Roadmap
 
 ## v0.1
 - Python core package
@@ -35,9 +35,9 @@
 - cloud event envelope
 - dashboard templates
 
-## v1.0 조건
-- public API 안정화
-- binding API 안정화
-- semantics 문서화 완료
-- 3개 이상 DB에서 production adoption signal
-- upgrade/migration story 정리
+## v1.0 Criteria
+- Public API stabilized
+- Binding API stabilized
+- Semantics documentation complete
+- Production adoption signal from 3+ DBs
+- Upgrade/migration story documented

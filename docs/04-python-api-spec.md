@@ -1,15 +1,15 @@
-# Python API 스펙
+# Python API Spec
 
-## 1. 디자인 목표
+## 1. Design Goals
 
-- Azure Functions Python v2와 자연스럽게 맞아야 한다.
-- 사용자는 DB polling orchestration보다 handler에 집중해야 한다.
-- 단순한 경우는 10줄 내로 끝나야 한다.
-- 고급 사용자는 imperative API로 세부 제어 가능해야 한다.
+- Should integrate naturally with Azure Functions Python v2.
+- Users should focus on handlers rather than DB polling orchestration.
+- Simple cases should be completable in under 10 lines.
+- Advanced users should be able to exercise fine-grained control via the imperative API.
 
-## 2. 표면 API
+## 2. Surface API
 
-### 2.1 권장 방식: helper + Azure schedule decorator
+### 2.1 Recommended Approach: Helper + Azure Schedule Decorator
 
 ```python
 import azure.functions as func
@@ -43,7 +43,7 @@ def handle_orders(events, context):
         print(event.pk, event.after)
 ```
 
-### 2.2 decorator sugar
+### 2.2 Decorator Sugar
 
 ```python
 import azure.functions as func
@@ -67,10 +67,9 @@ def handle_orders(events, context):
     ...
 ```
 
-실제 구현에서는 decorator가 wrapper를 생성하되, Azure Functions decorator와의 충돌이 없도록
-wrapper signature를 단순하게 유지한다.
+In the actual implementation, the decorator creates a wrapper while keeping the wrapper signature simple to avoid conflicts with Azure Functions decorators.
 
-## 3. 핵심 타입
+## 3. Core Types
 
 ### 3.1 PollTrigger
 ```python
@@ -138,9 +137,9 @@ class RowChange:
     metadata: dict[str, object]
 ```
 
-## 4. Handler 규칙
+## 4. Handler Rules
 
-지원 signature:
+Supported signatures:
 
 ```python
 def handler(events): ...
@@ -149,40 +148,40 @@ async def handler(events): ...
 async def handler(events, context): ...
 ```
 
-규칙:
-- `events`는 비어 있을 수도 있다. 기본값은 **empty batch skip**.
-- handler가 예외를 던지면 batch 실패로 간주한다.
-- handler는 가능하면 idempotent 해야 한다.
+Rules:
+- `events` may be empty. Default behavior is **empty batch skip**.
+- If the handler raises an exception, the batch is treated as failed.
+- Handlers should be idempotent whenever possible.
 
-## 5. Source 정의 방식
+## 5. Source Definition Modes
 
-### 5.1 Table mode
+### 5.1 Table Mode
 - table
 - schema
 - cursor_column
 - pk_columns
 
-### 5.2 Query mode
+### 5.2 Query Mode
 - query
 - cursor_column alias
 - pk column alias
 - parameterized query
 
-### 5.3 Outbox mode
+### 5.3 Outbox Mode
 - table=`outbox_events`
 - payload column
-- status column optional
+- status column (optional)
 
-## 6. 권장 설정 기본값
+## 6. Recommended Default Settings
 
 - `batch_size=100`
 - `max_batches_per_tick=1`
 - `lease_ttl_seconds=120`
 - `heartbeat_interval_seconds=20`
 - `use_monitor=True`
-- `schedule=0 */1 * * * *` (1분)
+- `schedule=0 */1 * * * *` (every 1 minute)
 
-## 7. 에러 분류
+## 7. Error Classification
 
 ```python
 class PollerError(Exception): ...
@@ -195,7 +194,7 @@ class LostLeaseError(PollerError): ...
 class SerializationError(PollerError): ...
 ```
 
-## 8. 향후 API
+## 8. Future API
 
 - `db.outbox(...)`
 - `db.backfill(...)`
@@ -203,7 +202,7 @@ class SerializationError(PollerError): ...
 - `db.model(OrderModel)`
 - `db.partitioned(...)`
 
-## 9. API 안정성 정책
+## 9. API Stability Policy
 
 ### Experimental
 - CDC strategy
@@ -214,7 +213,7 @@ class SerializationError(PollerError): ...
 - decorator sugar
 - Pydantic mapping
 
-### Stable target
+### Stable Target
 - PollTrigger
 - SqlAlchemySource
 - BlobCheckpointStore
@@ -245,7 +244,7 @@ writer.insert_many(rows=[...])
 writer.upsert_many(rows=[...], conflict_columns=["id"])
 ```
 
-### 10.3 Combined trigger + binding example
+### 10.3 Combined Trigger + Binding Example
 
 ```python
 import azure.functions as func
@@ -286,7 +285,7 @@ def handle_orders(events, context):
         writer.close()
 ```
 
-### 10.4 DbReader types
+### 10.4 DbReader Types
 
 ```python
 class DbReader:
@@ -296,7 +295,7 @@ class DbReader:
     def close(self) -> None: ...
 ```
 
-### 10.5 DbWriter types
+### 10.5 DbWriter Types
 
 ```python
 class DbWriter:
@@ -310,7 +309,7 @@ class DbWriter:
     def close(self) -> None: ...
 ```
 
-### 10.6 Binding error classes
+### 10.6 Binding Error Classes
 
 ```python
 class DbError(Exception): ...
