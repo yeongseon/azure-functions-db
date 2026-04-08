@@ -105,9 +105,10 @@ Unlike triggers, they do not manage state (checkpoint/lease) and operate on a pe
   - PK mode: `pk=dict | Callable` → injects `dict | None`
   - Query mode: `query=str, params=dict | Callable` → injects `list[dict]`
   - `on_not_found="none"` (default) or `"raise"` for strict mode
-- `@db.output()` — auto-writes handler return value to DB
+- `@db.output()` — injects a `DbOut` instance; handler calls `.set()` to write explicitly
   - `action="insert"` (default) or `"upsert"` with `conflict_columns`
-  - Return `dict` for single row, `list[dict]` for batch, `None` for no-op
+  - `.set(dict)` for single row, `.set(list[dict])` for batch, `.set(None)` for no-op
+  - Handler return value is independent of the write (e.g. return `HttpResponse`)
 
 ### 7.2 Client Injection Decorators (imperative escape hatches)
 

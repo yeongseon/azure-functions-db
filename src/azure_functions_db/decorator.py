@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
 import functools
 import inspect
 import logging
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -20,8 +19,6 @@ from .trigger.poll import PollTrigger
 from .trigger.retry import RetryPolicy
 from .trigger.runner import SourceAdapter, StateStore
 
-T = TypeVar("T")
-
 logger = logging.getLogger(__name__)
 
 # Parameter names reserved by Azure Functions runtime.
@@ -29,37 +26,123 @@ _RESERVED_ARGS = frozenset({"timer", "req", "context", "msg", "input", "output"}
 _DB_DECORATOR_ATTR = "_db_decorators"
 
 
-@dataclass(frozen=True, slots=True)
-class OutputResult(Generic[T]):
-    """Wrapper for returning a value to the caller while writing different data to the DB.
+class DbOut:
+    """Output binding parameter injected by the ``output`` decorator.
 
-    Use this when your handler needs to return something (e.g. an HTTP response)
-    that is *not* the database write payload.
+    Mirrors the native Azure Functions ``func.Out[T]`` pattern.
+    The handler calls ``.set()`` to write data to the database explicitly,
+    leaving the handler's return value free for other purposes (e.g.
+    ``HttpResponse``).
 
     Example::
 
-        @db.output(url="%DB_URL%", table="orders")
-        def create_order(req) -> OutputResult[func.HttpResponse]:
-            return OutputResult(
-                return_value=func.HttpResponse("Created", status_code=201),
-                write={"id": 1, "status": "pending"},
-            )
+        @db.output("order", url="%DB_URL%", table="orders")
+        def create_order(req, order: DbOut) -> func.HttpResponse:
+            order.set({"id": 1, "status": "pending"})
+            return func.HttpResponse("Created", status_code=201)
 
-    Without ``OutputResult``, the handler's return value is used as both
-    the DB write payload and the function return.  With ``OutputResult``,
-    ``write`` goes to the database and ``return_value`` is returned to
-    the Azure Functions runtime.
-
-    Set ``write=None`` to skip the database write entirely.
+    Accepted types for ``.set()``:
+        - ``dict`` — single-row write
+        - ``list[dict]`` — batch write
+        - ``BaseModel`` / ``list[BaseModel]`` — auto-dumped to dict
+        - ``None`` — no-op (skip write)
     """
 
-    return_value: T
-    """The value returned to the Azure Functions runtime (e.g. ``HttpResponse``)."""
+    def __init__(
+        self,
+        *,
+        url: str,
+        table: str,
+        schema: str | None,
+        action: Literal["insert", "upsert"],
+        conflict_columns: list[str] | None,
+        engine_provider: EngineProvider | None,
+    ) -> None:
+        self._url = url
+        self._table = table
+        self._schema = schema
+        self._action = action
+        self._conflict_columns = conflict_columns
+        self._engine_provider = engine_provider
 
-    write: dict[str, object] | list[dict[str, object]] | BaseModel | list[BaseModel] | None = None
-    """The database write payload.  Accepts the same types as a plain return:
-    ``dict`` for single row, ``list[dict]`` for batch, or ``None`` for no-op.
-    ``BaseModel`` and ``list[BaseModel]`` are also accepted."""
+    def set(
+        self,
+        data: dict[str, object] | list[dict[str, object]] | BaseModel | list[BaseModel] | None,
+    ) -> None:
+        """Write *data* to the configured table.
+
+        Parameters
+        ----------
+        data:
+            ``dict`` for single row, ``list[dict]`` for batch,
+            ``BaseModel`` / ``list[BaseModel]`` for Pydantic models,
+            or ``None`` to skip.
+        """
+        if data is None:
+            return
+
+        writer = DbWriter(
+            url=self._url,
+            table=self._table,
+            schema=self._schema,
+            engine_provider=self._engine_provider,
+        )
+        try:
+            if isinstance(data, (dict, BaseModel)):
+                row = _normalize_output_row(data)
+                if self._action == "upsert":
+                    if self._conflict_columns is None:
+                        msg = "output: unreachable – upsert without conflict_columns"
+                        raise ConfigurationError(msg)
+                    writer.upsert(data=row, conflict_columns=self._conflict_columns)
+                else:
+                    writer.insert(data=row)
+            elif isinstance(data, list):
+                bad = next(
+                    (i for i, row in enumerate(data) if not isinstance(row, (dict, BaseModel))),
+                    None,
+                )
+                if bad is not None:
+                    bad_type = type(data[bad]).__name__
+                    msg = (
+                        f"output: DbOut.set() received list with non-dict element "
+                        f"at index {bad} ({bad_type}); expected list[dict | BaseModel]"
+                    )
+                    raise ConfigurationError(msg)
+                rows = [_normalize_output_row(row) for row in data]
+                if self._action == "upsert":
+                    if self._conflict_columns is None:
+                        msg = "output: unreachable – upsert without conflict_columns"
+                        raise ConfigurationError(msg)
+                    writer.upsert_many(rows=rows, conflict_columns=self._conflict_columns)
+                else:
+                    writer.insert_many(rows=rows)
+            else:
+                msg = (
+                    f"output: DbOut.set() received {type(data).__name__}, "
+                    f"expected dict, list[dict], BaseModel, list[BaseModel], or None"
+                )
+                raise ConfigurationError(msg)
+        finally:
+            writer.close()
+
+
+class _AsyncDbOutProxy:
+    """Async wrapper for :class:`DbOut` used in async handlers.
+
+    Delegates ``.set()`` to a worker thread via ``asyncio.to_thread()``
+    so the event loop stays free.
+    """
+
+    def __init__(self, out: DbOut) -> None:
+        self._out = out
+
+    async def set(
+        self,
+        data: dict[str, object] | list[dict[str, object]] | BaseModel | list[BaseModel] | None,
+    ) -> None:
+        """Async version of :meth:`DbOut.set`."""
+        await asyncio.to_thread(self._out.set, data)
 
 
 def _get_db_decorators(fn: Callable[..., Any]) -> frozenset[str]:
@@ -82,14 +165,23 @@ def _check_composition(fn: Callable[..., Any], name: str) -> None:
 
     if name == "input" and "inject_reader" in existing:
         msg = (
-            "Cannot combine 'input' and 'inject_reader' on the same handler "
-            "— use one or the other"
+            "Cannot combine 'input' and 'inject_reader' on the same handler — use one or the other"
         )
         raise ConfigurationError(msg)
     if name == "inject_reader" and "input" in existing:
         msg = (
-            "Cannot combine 'inject_reader' and 'input' on the same handler "
-            "— use one or the other"
+            "Cannot combine 'inject_reader' and 'input' on the same handler — use one or the other"
+        )
+        raise ConfigurationError(msg)
+
+    if name == "output" and "inject_writer" in existing:
+        msg = (
+            "Cannot combine 'output' and 'inject_writer' on the same handler — use one or the other"
+        )
+        raise ConfigurationError(msg)
+    if name == "inject_writer" and "output" in existing:
+        msg = (
+            "Cannot combine 'inject_writer' and 'output' on the same handler — use one or the other"
         )
         raise ConfigurationError(msg)
 
@@ -258,7 +350,9 @@ class DbBindings:
     decorator experience.
 
     **Data injection** (``input`` / ``output``):
-        Handlers receive actual data or have return values auto-written.
+        ``input`` injects query results into handler parameters.
+        ``output`` injects a :class:`DbOut` instance; call ``.set()``
+        to write data explicitly.
 
     **Client injection** (``inject_reader`` / ``inject_writer``):
         Handlers receive ``DbReader`` / ``DbWriter`` instances for
@@ -271,18 +365,22 @@ class DbBindings:
             - ``trigger`` + ``inject_writer`` can be combined (imperative write in trigger handler)
             - ``input`` + ``output`` can be combined (read data, write results)
             - ``input`` and ``inject_reader`` are mutually exclusive
+            - ``output`` and ``inject_writer`` are mutually exclusive
             - No decorator can be applied twice to the same handler
 
         Valid combinations::
 
             @app.schedule(...)
             @db.trigger(...)        # Azure trigger outermost
-            @db.output(...)         # db output innermost
-            def handler(events) -> list[dict]: ...
+            @db.output("out", ...)  # db output innermost
+            def handler(events, out: DbOut) -> None:
+                out.set([...])
 
             @db.input("user", ...)
-            @db.output(...)
-            def handler(user) -> dict: ...
+            @db.output("out", ...)
+            def handler(user, out: DbOut) -> dict:
+                out.set({...})
+                return user
 
     Note: This is a pseudo-trigger implementation. ``trigger`` requires
     an actual Azure Functions trigger (e.g. ``@app.schedule``) to fire.
@@ -590,6 +688,7 @@ class DbBindings:
 
     def output(
         self,
+        arg_name: str,
         *,
         url: str,
         table: str,
@@ -598,23 +697,20 @@ class DbBindings:
         conflict_columns: list[str] | None = None,
         engine_provider: EngineProvider | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Decorator that auto-writes the handler's return value to the database.
+        """Decorator that injects a :class:`DbOut` instance into the handler.
 
-        The handler's return value is intercepted and written to the
-        configured table.  No ``arg_name`` is needed.
+        Follows the native Azure Functions output binding pattern
+        (``func.Out[T]`` with ``.set()``).  The handler parameter named
+        ``arg_name`` will receive a ``DbOut`` instance for sync handlers
+        or an ``_AsyncDbOutProxy`` for async handlers.
 
-        Return value contract:
-            - ``dict`` -> single-row write
-            - ``list[dict]`` -> batch write
-            - ``BaseModel`` / ``list[BaseModel]`` -> auto-dumped to dict
-            - ``None`` -> no-op
-            - ``OutputResult`` -> ``write`` field goes to DB,
-              ``return_value`` is returned to the Azure Functions runtime.
-              Use this when the caller needs a different return (e.g.
-              ``HttpResponse``) than what is written to the database.
+        The handler's return value is **not** intercepted — use
+        ``out.set(data)`` to write explicitly.
 
         Parameters
         ----------
+        arg_name:
+            Name of the handler parameter that receives the ``DbOut``.
         url:
             SQLAlchemy connection URL.  Supports ``%VAR%`` env-var substitution.
         table:
@@ -641,89 +737,36 @@ class DbBindings:
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             _check_composition(fn, "output")
+            _validate_arg_name(arg_name, fn, "output")
             is_async = inspect.iscoroutinefunction(fn)
 
-            def _do_write(result: Any) -> None:
-                """Write the handler result to DB (runs in calling thread)."""
-                if isinstance(result, OutputResult):
-                    result = result.write
-                if result is None:
-                    return
-
-                writer = DbWriter(
-                    url=url,
-                    table=table,
-                    schema=schema,
-                    engine_provider=engine_provider,
-                )
-                try:
-                    if isinstance(result, (dict, BaseModel)):
-                        row = _normalize_output_row(result)
-                        if action == "upsert":
-                            if conflict_columns is None:
-                                msg = "output: unreachable – upsert without conflict_columns"
-                                raise ConfigurationError(msg)
-                            writer.upsert(data=row, conflict_columns=conflict_columns)
-                        else:
-                            writer.insert(data=row)
-                    elif isinstance(result, list):
-                        bad = next(
-                            (
-                                i
-                                for i, row in enumerate(result)
-                                if not isinstance(row, (dict, BaseModel))
-                            ),
-                            None,
-                        )
-                        if bad is not None:
-                            bad_type = type(result[bad]).__name__
-                            msg = (
-                                f"output: handler returned list with non-dict element "
-                                f"at index {bad} ({bad_type}); expected list[dict | BaseModel]"
-                            )
-                            raise ConfigurationError(msg)
-                        rows = [_normalize_output_row(row) for row in result]
-                        if action == "upsert":
-                            if conflict_columns is None:
-                                msg = "output: unreachable – upsert without conflict_columns"
-                                raise ConfigurationError(msg)
-                            writer.upsert_many(rows=rows, conflict_columns=conflict_columns)
-                        else:
-                            writer.insert_many(rows=rows)
-                    else:
-                        msg = (
-                            f"output: handler returned {type(result).__name__}, "
-                            f"expected dict, list[dict], BaseModel, list[dict | BaseModel], or None"
-                        )
-                        raise ConfigurationError(msg)
-                finally:
-                    writer.close()
-
-            fn_sig = inspect.signature(fn, follow_wrapped=False)
+            out = DbOut(
+                url=url,
+                table=table,
+                schema=schema,
+                action=action,
+                conflict_columns=conflict_columns,
+                engine_provider=engine_provider,
+            )
 
             if is_async:
+                proxy = _AsyncDbOutProxy(out)
 
                 @functools.wraps(fn)
                 async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                    result = await fn(*args, **kwargs)
-                    await asyncio.to_thread(_do_write, result)
-                    if isinstance(result, OutputResult):
-                        return result.return_value
-                    return result
+                    kwargs[arg_name] = proxy
+                    return await fn(*args, **kwargs)
 
-                setattr(async_wrapper, "__signature__", fn_sig)
+                setattr(async_wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
                 _mark_decorator(async_wrapper, "output")
                 return async_wrapper
 
             @functools.wraps(fn)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                result = fn(*args, **kwargs)
-                _do_write(result)
-                if isinstance(result, OutputResult):
-                    return result.return_value
-                return result
+                kwargs[arg_name] = out
+                return fn(*args, **kwargs)
 
-            setattr(wrapper, "__signature__", fn_sig)
+            setattr(wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
             _mark_decorator(wrapper, "output")
             return wrapper
 

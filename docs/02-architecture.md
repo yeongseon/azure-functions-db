@@ -19,7 +19,7 @@
     - per-invocation session/connection lifecycle management
 4. **decorator**
     - `DbBindings` class providing Azure Functions-style decorators
-    - `trigger` wraps `PollTrigger`, `input` injects query results, `output` auto-writes return values
+    - `trigger` wraps `PollTrigger`, `input` injects query results, `output` injects `DbOut` for explicit writes
     - `inject_reader` / `inject_writer` provide imperative `DbReader` / `DbWriter` injection
     - consumes both `trigger` and `binding` modules
 
@@ -73,7 +73,7 @@ Azure Function Invocation
 |-----------|--------------|-----------|
 | `trigger` | ❌ Not supported | `PollTrigger.run` is synchronous; async handlers are rejected at decoration time |
 | `input` | ✅ Supported | DB I/O runs via `asyncio.to_thread()` |
-| `output` | ✅ Supported | DB write runs via `asyncio.to_thread()` |
+| `output` | ✅ Supported | DB write runs via `asyncio.to_thread()` through `_AsyncDbOutProxy` |
 | `inject_reader` | ✅ Supported | Returns `_AsyncDbReaderProxy` with async methods |
 | `inject_writer` | ✅ Supported | Returns `_AsyncDbWriterProxy` with async methods |
 
@@ -110,6 +110,7 @@ DbBindings decorators can be combined on a single handler. The following rules a
 | Combination | Reason |
 |------------|--------|
 | `input` + `inject_reader` | Redundant — both read data, use one |
+| `output` + `inject_writer` | Redundant — both write data, use one |
 | Any decorator applied twice | Not meaningful |
 
 ### Ordering
