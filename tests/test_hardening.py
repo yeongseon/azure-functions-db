@@ -4,11 +4,11 @@ from collections.abc import Sequence
 
 import pytest
 
-from azure_functions_db.core.types import CursorValue, SourceDescriptor
+from azure_functions_db.core.types import CursorValue, RawRecord, SourceDescriptor
 from azure_functions_db.state.errors import LeaseConflictError
 from azure_functions_db.trigger.errors import CommitError, HandlerError, LostLeaseError
 from azure_functions_db.trigger.events import RowChange
-from azure_functions_db.trigger.runner import PollRunner, RawRecord
+from azure_functions_db.trigger.runner import PollRunner
 
 
 class SimulatedCrash(BaseException):

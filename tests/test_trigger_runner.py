@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from azure_functions_db.core.types import CursorValue, SourceDescriptor
+from azure_functions_db.core.types import CursorValue, RawRecord, SourceDescriptor
 from azure_functions_db.observability import (
     METRIC_BATCHES_TOTAL,
     METRIC_COMMIT_DURATION_MS,
@@ -29,7 +29,7 @@ from azure_functions_db.trigger.errors import (
     SourceConfigurationError,
 )
 from azure_functions_db.trigger.events import RowChange
-from azure_functions_db.trigger.runner import PollRunner, RawRecord
+from azure_functions_db.trigger.runner import PollRunner
 
 
 class FakeStateStore:
