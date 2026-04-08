@@ -130,6 +130,7 @@ class TestTriggerWithWriter:
         def handler(events: list[RowChange]) -> None:
             with DbWriter(url=dest_url, table="processed") as writer:
                 for event in events:
+                    assert event.after is not None  # noqa: S101  # nosec B101
                     writer.insert(
                         data={
                             "id": event.pk["id"],
@@ -168,6 +169,7 @@ class TestTriggerWithWriter:
         def handler(events: list[RowChange]) -> None:
             with DbWriter(url=dest_url, table="processed") as writer:
                 for event in events:
+                    assert event.after is not None  # noqa: S101  # nosec B101
                     writer.upsert(
                         data={
                             "id": event.pk["id"],
@@ -228,7 +230,7 @@ class TestTriggerWithReaderAndWriter:
         assert count == 3
         rows = _read_all(dest_url, "processed")
         assert len(rows) == 3
-        names = sorted(r["name"] for r in rows)
+        names = sorted(str(r["name"]) for r in rows)
         assert names == ["Alice", "Bob", "Charlie"]
 
 
@@ -258,6 +260,7 @@ class TestEngineProviderSharing:
                     url=dest_url, table="processed", engine_provider=provider
                 ) as writer:
                     for event in events:
+                        assert event.after is not None  # noqa: S101  # nosec B101
                         writer.upsert(
                             data={
                                 "id": event.pk["id"],
@@ -329,6 +332,7 @@ class TestCheckpointResumeAfterFailure:
             if call_count == 1:
                 with DbWriter(url=dest_url, table="processed") as writer:
                     for event in events:
+                        assert event.after is not None  # noqa: S101  # nosec B101
                         writer.insert(
                             data={
                                 "id": event.pk["id"],
@@ -359,6 +363,7 @@ class TestCheckpointResumeAfterFailure:
         def handler(events: list[RowChange]) -> None:
             with DbWriter(url=dest_url, table="processed") as writer:
                 for event in events:
+                    assert event.after is not None  # noqa: S101  # nosec B101
                     writer.upsert(
                         data={
                             "id": event.pk["id"],
@@ -415,14 +420,16 @@ class TestUpsertManyBatchIntegration:
         )
 
         def handler(events: list[RowChange]) -> None:
-            rows = [
-                {
-                    "id": event.pk["id"],
-                    "name": event.after["name"],
-                    "cursor_val": event.cursor,
-                }
-                for event in events
-            ]
+            rows: list[dict[str, object]] = []
+            for event in events:
+                assert event.after is not None  # noqa: S101  # nosec B101
+                rows.append(
+                    {
+                        "id": event.pk["id"],
+                        "name": event.after["name"],
+                        "cursor_val": event.cursor,
+                    }
+                )
             if rows:
                 with DbWriter(url=dest_url, table="processed") as writer:
                     writer.upsert_many(rows=rows, conflict_columns=["id"])
