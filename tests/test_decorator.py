@@ -12,7 +12,7 @@ from azure_functions_db import ConfigurationError, DbBindings
 from azure_functions_db.binding.reader import DbReader
 from azure_functions_db.binding.writer import DbWriter
 from azure_functions_db.core.errors import NotFoundError
-from azure_functions_db.decorator import OutputResult
+from azure_functions_db.decorator import DbOut
 from azure_functions_db.observability import NoOpCollector
 from azure_functions_db.trigger.errors import FetchError
 from azure_functions_db.trigger.events import RowChange
@@ -548,7 +548,7 @@ def test_input_hides_arg_from_signature(tmp_path: Path) -> None:
 
 
 # =====================================================================
-# output tests — return-value auto-write
+# output tests — DbOut parameter injection
 # =====================================================================
 
 
@@ -556,13 +556,14 @@ def test_output_insert_dict(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-insert-dict.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> dict[str, object]:
-        return {"id": 1, "status": "done"}
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        out.set({"id": 1, "status": "done"})
+        return "ok"
 
     result = handler()
 
-    assert result == {"id": 1, "status": "done"}
+    assert result == "ok"
     assert _read_orders(url) == [{"id": 1, "status": "done"}]
 
 
@@ -570,16 +571,19 @@ def test_output_insert_list(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-insert-list.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> list[dict[str, object]]:
-        return [
-            {"id": 1, "status": "a"},
-            {"id": 2, "status": "b"},
-        ]
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        out.set(
+            [
+                {"id": 1, "status": "a"},
+                {"id": 2, "status": "b"},
+            ]
+        )
+        return "batch"
 
     result = handler()
 
-    assert len(result) == 2
+    assert result == "batch"
     assert _read_orders(url) == [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
 
 
@@ -587,40 +591,56 @@ def test_output_none_is_noop(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-none.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> None:
-        return None
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> None:
+        out.set(None)
 
     handler()
 
     assert _read_orders(url) == []
 
 
-def test_output_accepts_basemodel_return(tmp_path: Path) -> None:
+def test_output_no_set_call_is_noop(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "output-no-set.db")
+    _create_orders_table(url)
+
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        return "no write"
+
+    result = handler()
+
+    assert result == "no write"
+    assert _read_orders(url) == []
+
+
+def test_output_accepts_basemodel(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-model.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> OrderModel:
-        return OrderModel(id=1, status="done")
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        out.set(OrderModel(id=1, status="done"))
+        return "model_written"
 
     result = handler()
 
-    assert result == OrderModel(id=1, status="done")
+    assert result == "model_written"
     assert _read_orders(url) == [{"id": 1, "status": "done"}]
 
 
-def test_output_accepts_list_basemodel_return(tmp_path: Path) -> None:
+def test_output_accepts_list_basemodel(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-model-list.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> list[OrderModel]:
-        return [OrderModel(id=1, status="a"), OrderModel(id=2, status="b")]
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        out.set([OrderModel(id=1, status="a"), OrderModel(id=2, status="b")])
+        return "batch_model"
 
     result = handler()
 
-    assert result == [OrderModel(id=1, status="a"), OrderModel(id=2, status="b")]
+    assert result == "batch_model"
     assert _read_orders(url) == [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
 
 
@@ -628,13 +648,14 @@ def test_output_accepts_mixed_list(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-model-mixed.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> list[dict[str, object] | OrderModel]:
-        return [{"id": 1, "status": "a"}, OrderModel(id=2, status="b")]
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> str:
+        out.set([{"id": 1, "status": "a"}, OrderModel(id=2, status="b")])  # type: ignore[arg-type]
+        return "mixed"
 
     result = handler()
 
-    assert result == [{"id": 1, "status": "a"}, OrderModel(id=2, status="b")]
+    assert result == "mixed"
     assert _read_orders(url) == [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
 
 
@@ -644,16 +665,16 @@ def test_output_upsert_dict(tmp_path: Path) -> None:
 
     db = DbBindings()
 
-    @db.output(url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
-    def handler() -> dict[str, object]:
-        return {"id": 1, "status": "first"}
+    @db.output("out", url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
+    def handler(out: DbOut) -> None:
+        out.set({"id": 1, "status": "first"})
 
     handler()
     assert _read_orders(url) == [{"id": 1, "status": "first"}]
 
-    @db.output(url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
-    def handler2() -> dict[str, object]:
-        return {"id": 1, "status": "updated"}
+    @db.output("out2", url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
+    def handler2(out2: DbOut) -> None:
+        out2.set({"id": 1, "status": "updated"})
 
     handler2()
     assert _read_orders(url) == [{"id": 1, "status": "updated"}]
@@ -664,10 +685,10 @@ def test_output_upsert_list(tmp_path: Path) -> None:
     _create_orders_table(url)
 
     @DbBindings().output(
-        url=url, table="processed_orders", action="upsert", conflict_columns=["id"]
+        "out", url=url, table="processed_orders", action="upsert", conflict_columns=["id"]
     )
-    def handler() -> list[dict[str, object]]:
-        return [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
+    def handler(out: DbOut) -> None:
+        out.set([{"id": 1, "status": "a"}, {"id": 2, "status": "b"}])
 
     handler()
     assert _read_orders(url) == [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
@@ -675,16 +696,16 @@ def test_output_upsert_list(tmp_path: Path) -> None:
 
 def test_output_upsert_requires_conflict_columns() -> None:
     with pytest.raises(ConfigurationError, match="requires 'conflict_columns'"):
-        DbBindings().output(url="sqlite:///unused.db", table="t", action="upsert")
+        DbBindings().output("out", url="sqlite:///unused.db", table="t", action="upsert")
 
 
-def test_output_rejects_invalid_return_type(tmp_path: Path) -> None:
+def test_output_rejects_invalid_set_type(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-invalid.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> str:
-        return "not a dict"
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> None:
+        out.set("not a dict")  # type: ignore[arg-type]
 
     with pytest.raises(ConfigurationError, match="expected dict, list"):
         handler()
@@ -702,9 +723,9 @@ def test_output_auto_closes_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(DbWriter, "close", tracking_close)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> dict[str, object]:
-        return {"id": 1, "status": "done"}
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> None:
+        out.set({"id": 1, "status": "done"})
 
     handler()
 
@@ -712,23 +733,65 @@ def test_output_auto_closes_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 def test_output_preserves_function_name() -> None:
-    @DbBindings().output(url="sqlite:///unused.db", table="t")
-    def my_handler() -> None:
-        return None
+    @DbBindings().output("out", url="sqlite:///unused.db", table="t")
+    def my_handler(out: DbOut) -> None:
+        pass
 
     assert my_handler.__name__ == "my_handler"
 
 
-def test_output_returns_original_value(tmp_path: Path) -> None:
+def test_output_return_value_is_independent(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "output-return.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> dict[str, object]:
-        return {"id": 1, "status": "done"}
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> dict[str, object]:
+        out.set({"id": 1, "status": "done"})
+        return {"message": "Created"}
 
     result = handler()
-    assert result == {"id": 1, "status": "done"}
+    assert result == {"message": "Created"}
+    assert _read_orders(url) == [{"id": 1, "status": "done"}]
+
+
+def test_output_invalid_arg_name_raises() -> None:
+    with pytest.raises(ConfigurationError, match="output arg_name='out' not found"):
+
+        @DbBindings().output("out", url="sqlite:///unused.db", table="t")
+        def handler() -> None:
+            return None
+
+
+def test_output_reserved_arg_name_raises() -> None:
+    with pytest.raises(ConfigurationError, match="conflicts with Azure Functions"):
+
+        @DbBindings().output("output", url="sqlite:///unused.db", table="t")
+        def handler(output: DbOut) -> None:
+            pass
+
+
+def test_output_hides_arg_from_signature() -> None:
+    import inspect
+
+    @DbBindings().output("out", url="sqlite:///unused.db", table="t")
+    def handler(req: object, out: DbOut) -> None:
+        pass
+
+    sig = inspect.signature(handler)
+    assert "req" in sig.parameters
+    assert "out" not in sig.parameters
+
+
+def test_output_rejects_invalid_list_elements(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "output-bad-list.db")
+    _create_orders_table(url)
+
+    @DbBindings().output("out", url=url, table="processed_orders")
+    def handler(out: DbOut) -> None:
+        out.set([{"id": 1, "status": "ok"}, "not_a_dict"])  # type: ignore[arg-type]
+
+    with pytest.raises(ConfigurationError, match="non-dict element at index 1"):
+        handler()
 
 
 # =====================================================================
@@ -890,9 +953,9 @@ def test_trigger_stacked_with_output(tmp_path: Path) -> None:
         source=FakeSourceAdapter(batches=[[{"id": 1, "updated_at": 100}]]),
         checkpoint_store=FakeStateStore(),
     )
-    @db.output(url=url, table="processed_orders")
-    def handler(events: list[RowChange]) -> list[dict[str, object]]:
-        return [{"id": e.pk["id"], "status": "done"} for e in events]
+    @db.output("out", url=url, table="processed_orders")
+    def handler(events: list[RowChange], out: DbOut) -> None:
+        out.set([{"id": e.pk["id"], "status": "done"} for e in events])
 
     result = handler(object())
 
@@ -946,6 +1009,27 @@ def test_trigger_stacked_signature_hides_db_params() -> None:
     assert "writer" not in param_names
 
 
+def test_trigger_stacked_with_output_signature_hides_db_params() -> None:
+    import inspect
+
+    db = DbBindings()
+
+    @db.trigger(
+        arg_name="events",
+        source=FakeSourceAdapter(batches=[]),
+        checkpoint_store=FakeStateStore(),
+    )
+    @db.output("out", url="sqlite:///unused.db", table="t")
+    def handler(timer: object, events: list[RowChange], out: DbOut) -> None:
+        del timer, events, out
+
+    sig = inspect.signature(handler)
+    param_names = list(sig.parameters.keys())
+    assert "timer" in param_names
+    assert "events" not in param_names
+    assert "out" not in param_names
+
+
 def test_trigger_rejects_async_inject_writer_wrapper() -> None:
     db = DbBindings()
 
@@ -970,15 +1054,15 @@ def test_input_stacked_with_output(tmp_path: Path) -> None:
     db = DbBindings()
 
     @db.input("user", url=url_read, table="users", pk={"id": 1})
-    @db.output(url=url_write, table="processed_orders")
-    def handler(user: dict[str, object] | None) -> dict[str, object] | None:
-        if user is None:
-            return None
-        return {"id": user["id"], "status": "processed"}
+    @db.output("out", url=url_write, table="processed_orders")
+    def handler(user: dict[str, object] | None, out: DbOut) -> str:
+        if user is not None:
+            out.set({"id": user["id"], "status": "processed"})
+        return "done"
 
     result = handler()
 
-    assert result == {"id": 1, "status": "processed"}
+    assert result == "done"
     assert _read_orders(url_write) == [{"id": 1, "status": "processed"}]
 
 
@@ -1015,9 +1099,9 @@ def test_trigger_plus_output_allowed(tmp_path: Path) -> None:
         source=FakeSourceAdapter(batches=[]),
         checkpoint_store=FakeStateStore(),
     )
-    @db.output(url=url, table="processed_orders")
-    def handler(events: list[RowChange]) -> list[dict[str, object]]:
-        return [{"id": e.pk["id"], "status": "done"} for e in events]
+    @db.output("out", url=url, table="processed_orders")
+    def handler(events: list[RowChange], out: DbOut) -> None:
+        out.set([{"id": e.pk["id"], "status": "done"} for e in events])
 
     assert callable(handler)
 
@@ -1031,13 +1115,13 @@ def test_input_plus_output_allowed(tmp_path: Path) -> None:
     db = DbBindings()
 
     @db.input("user", url=url_read, table="users", pk={"id": 1})
-    @db.output(url=url_write, table="processed_orders")
-    def handler(user: dict[str, object] | None) -> dict[str, object] | None:
-        if user is None:
-            return None
-        return {"id": user["id"], "status": "processed"}
+    @db.output("out", url=url_write, table="processed_orders")
+    def handler(user: dict[str, object] | None, out: DbOut) -> str:
+        if user is not None:
+            out.set({"id": user["id"], "status": "processed"})
+        return "done"
 
-    assert handler() == {"id": 1, "status": "processed"}
+    assert handler() == "done"
     assert _read_orders(url_write) == [{"id": 1, "status": "processed"}]
 
 
@@ -1076,22 +1160,11 @@ def test_input_invalid_on_not_found_raises() -> None:
 def test_output_invalid_action_raises() -> None:
     with pytest.raises(ConfigurationError, match="action must be"):
         DbBindings().output(
+            "out",
             url="sqlite:///unused.db",
             table="t",
             action=cast(Any, "bogus"),
         )
-
-
-def test_output_rejects_invalid_list_elements(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "output-bad-list.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> list[object]:
-        return [{"id": 1, "status": "ok"}, "not_a_dict"]
-
-    with pytest.raises(ConfigurationError, match="non-dict element at index 1"):
-        handler()
 
 
 def test_trigger_forwards_host_params_at_runtime() -> None:
@@ -1126,10 +1199,10 @@ def test_trigger_forwards_host_params_with_output(tmp_path: Path) -> None:
         source=FakeSourceAdapter(batches=[[{"id": 1, "updated_at": 100}]]),
         checkpoint_store=FakeStateStore(),
     )
-    @db.output(url=url, table="processed_orders")
-    def handler(timer: object, events: list[RowChange]) -> list[dict[str, object]]:
+    @db.output("out", url=url, table="processed_orders")
+    def handler(timer: object, events: list[RowChange], out: DbOut) -> None:
         received["timer"] = timer
-        return [{"id": e.pk["id"], "status": "done"} for e in events]
+        out.set([{"id": e.pk["id"], "status": "done"} for e in events])
 
     result = handler(host_timer)
 
@@ -1193,13 +1266,14 @@ def test_output_async_insert(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "async-output-insert.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    async def handler() -> dict[str, object]:
-        return {"id": 1, "status": "async_done"}
+    @DbBindings().output("out", url=url, table="processed_orders")
+    async def handler(out: Any) -> str:
+        await out.set({"id": 1, "status": "async_done"})
+        return "async_created"
 
     result = asyncio.run(handler())
 
-    assert result == {"id": 1, "status": "async_done"}
+    assert result == "async_created"
     assert _read_orders(url) == [{"id": 1, "status": "async_done"}]
 
 
@@ -1209,12 +1283,14 @@ def test_output_async_none_is_noop(tmp_path: Path) -> None:
     url = _sqlite_url(tmp_path, "async-output-none.db")
     _create_orders_table(url)
 
-    @DbBindings().output(url=url, table="processed_orders")
-    async def handler() -> None:
-        return None
+    @DbBindings().output("out", url=url, table="processed_orders")
+    async def handler(out: Any) -> str:
+        await out.set(None)
+        return "async_ok"
 
-    asyncio.run(handler())
+    result = asyncio.run(handler())
 
+    assert result == "async_ok"
     assert _read_orders(url) == []
 
 
@@ -1247,156 +1323,27 @@ def test_inject_writer_async_injects_writer(tmp_path: Path) -> None:
 
 
 # =====================================================================
-# OutputResult tests — separate return value from write payload
+# output + inject_writer mutual exclusivity
 # =====================================================================
 
 
-def test_output_result_dict_write(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-dict.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> OutputResult[str]:
-        return OutputResult(
-            return_value="Created",
-            write={"id": 1, "status": "done"},
-        )
-
-    result = handler()
-
-    assert result == "Created"
-    assert _read_orders(url) == [{"id": 1, "status": "done"}]
-
-
-def test_output_result_none_write_skips_db(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-none.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> OutputResult[str]:
-        return OutputResult(return_value="OK", write=None)
-
-    result = handler()
-
-    assert result == "OK"
-    assert _read_orders(url) == []
-
-
-def test_output_result_list_write(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-list.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> OutputResult[str]:
-        return OutputResult(
-            return_value="batch",
-            write=[{"id": 1, "status": "a"}, {"id": 2, "status": "b"}],
-        )
-
-    result = handler()
-
-    assert result == "batch"
-    assert _read_orders(url) == [{"id": 1, "status": "a"}, {"id": 2, "status": "b"}]
-
-
-def test_output_result_basemodel_write(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-model.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> OutputResult[str]:
-        return OutputResult(
-            return_value="model_written",
-            write=OrderModel(id=1, status="done"),
-        )
-
-    result = handler()
-
-    assert result == "model_written"
-    assert _read_orders(url) == [{"id": 1, "status": "done"}]
-
-
-def test_output_result_async_dict_write(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-async-dict.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    async def handler() -> OutputResult[str]:
-        return OutputResult(
-            return_value="async_created",
-            write={"id": 1, "status": "async_done"},
-        )
-
-    result = asyncio.run(handler())
-
-    assert result == "async_created"
-    assert _read_orders(url) == [{"id": 1, "status": "async_done"}]
-
-
-def test_output_result_async_none_write(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-async-none.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    async def handler() -> OutputResult[str]:
-        return OutputResult(return_value="async_ok", write=None)
-
-    result = asyncio.run(handler())
-
-    assert result == "async_ok"
-    assert _read_orders(url) == []
-
-
-def test_output_result_upsert(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-upsert.db")
-    _create_orders_table(url)
-
+def test_output_and_inject_writer_conflict() -> None:
     db = DbBindings()
 
-    @db.output(url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
-    def handler() -> OutputResult[str]:
-        return OutputResult(
-            return_value="upserted",
-            write={"id": 1, "status": "first"},
-        )
+    with pytest.raises(ConfigurationError, match="Cannot combine"):
 
-    result = handler()
-    assert result == "upserted"
-    assert _read_orders(url) == [{"id": 1, "status": "first"}]
-
-    @db.output(url=url, table="processed_orders", action="upsert", conflict_columns=["id"])
-    def handler2() -> OutputResult[str]:
-        return OutputResult(
-            return_value="updated",
-            write={"id": 1, "status": "second"},
-        )
-
-    result2 = handler2()
-    assert result2 == "updated"
-    assert _read_orders(url) == [{"id": 1, "status": "second"}]
+        @db.output("out", url="sqlite:///x.db", table="t")
+        @db.inject_writer("writer", url="sqlite:///x.db", table="t")
+        def handler(out: DbOut, writer: DbWriter) -> None:
+            del out, writer
 
 
-def test_output_plain_dict_unaffected_by_output_result(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-legacy-dict.db")
-    _create_orders_table(url)
+def test_inject_writer_and_output_conflict() -> None:
+    db = DbBindings()
 
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> dict[str, object]:
-        return {"id": 1, "status": "legacy"}
+    with pytest.raises(ConfigurationError, match="Cannot combine"):
 
-    result = handler()
-
-    assert result == {"id": 1, "status": "legacy"}
-    assert _read_orders(url) == [{"id": 1, "status": "legacy"}]
-
-
-def test_output_plain_none_unaffected_by_output_result(tmp_path: Path) -> None:
-    url = _sqlite_url(tmp_path, "or-legacy-none.db")
-    _create_orders_table(url)
-
-    @DbBindings().output(url=url, table="processed_orders")
-    def handler() -> None:
-        return None
-
-    handler()
-    assert _read_orders(url) == []
+        @db.inject_writer("writer", url="sqlite:///x.db", table="t")
+        @db.output("out", url="sqlite:///x.db", table="t")
+        def handler(writer: DbWriter, out: DbOut) -> None:
+            del writer, out

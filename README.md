@@ -66,7 +66,7 @@ azure-functions-db[postgres]
 | Need | Decorator | Mode |
 |------|-----------|------|
 | Read data into handler | `input` | Declarative (data injection) |
-| Auto-write return value | `output` | Declarative (data injection) |
+| Write data to DB | `output` | Declarative (data injection) |
 | Complex reads (multiple queries) | `inject_reader` | Imperative (client injection) |
 | Complex writes (transactions) | `inject_writer` | Imperative (client injection) |
 | React to DB changes | `trigger` | Event-driven (pseudo-trigger) |
@@ -107,43 +107,44 @@ def list_active_users(users: list[dict]) -> None:
         print(user["email"])
 ```
 
-### Output Binding (auto-write)
+### Output Binding (data injection)
 
-`output` writes the handler's return value to the database automatically.
+`output` injects a `DbOut` instance into your handler — call `.set()` to write explicitly.
 
 ```python
-from azure_functions_db import DbBindings
+from azure_functions_db import DbBindings, DbOut
 
 db = DbBindings()
 
-# Insert — return a dict for single row, list[dict] for batch
-@db.output(url="%DB_URL%", table="orders")
-def create_order() -> dict:
-    return {"id": 1, "status": "pending", "total": 99.99}
+# Insert — call .set() with a dict for single row, list[dict] for batch
+@db.output("out", url="%DB_URL%", table="orders")
+def create_order(out: DbOut) -> str:
+    out.set({"id": 1, "status": "pending", "total": 99.99})
+    return "Created"
 
 # Upsert — set action and conflict_columns
-@db.output(url="%DB_URL%", table="orders",
+@db.output("out", url="%DB_URL%", table="orders",
               action="upsert", conflict_columns=["id"])
-def upsert_orders() -> list[dict]:
-    return [
+def upsert_orders(out: DbOut) -> str:
+    out.set([
         {"id": 1, "status": "shipped", "total": 99.99},
         {"id": 2, "status": "pending", "total": 49.99},
-    ]
+    ])
+    return "Upserted"
 ```
 
-When the return value and DB write payload differ (e.g. returning an HTTP response), use `OutputResult`:
+The handler's return value is independent of the write — use it for HTTP responses or anything else:
 
 ```python
-from azure_functions_db import DbBindings, OutputResult
+import azure.functions as func
+from azure_functions_db import DbBindings, DbOut
 
 db = DbBindings()
 
-@db.output(url="%DB_URL%", table="orders")
-def create_order(req) -> OutputResult:
-    return OutputResult(
-        return_value=func.HttpResponse("Created", status_code=201),
-        write={"id": 1, "status": "pending"},
-    )
+@db.output("out", url="%DB_URL%", table="orders")
+def create_order(req: func.HttpRequest, out: DbOut) -> func.HttpResponse:
+    out.set({"id": 1, "status": "pending"})
+    return func.HttpResponse("Created", status_code=201)
 ```
 
 Supported upsert dialects: PostgreSQL, SQLite, MySQL.
@@ -218,6 +219,7 @@ from azure.storage.blob import ContainerClient
 from azure_functions_db import (
     BlobCheckpointStore,
     DbBindings,
+    DbOut,
     EngineProvider,
     RowChange,
     SqlAlchemySource,
@@ -248,14 +250,15 @@ checkpoint_store = BlobCheckpointStore(
 @app.schedule(schedule="0 */1 * * * *", arg_name="timer", use_monitor=True)
 @db.trigger(arg_name="events", source=source, checkpoint_store=checkpoint_store)
 @db.output(
+    "out",
     url="%DEST_DB_URL%",
     table="processed_orders",
     action="upsert",
     conflict_columns=["order_id"],
     engine_provider=engine_provider,
 )
-def orders_poll(timer: func.TimerRequest, events: list[RowChange]) -> list[dict]:
-    return [
+def orders_poll(timer: func.TimerRequest, events: list[RowChange], out: DbOut) -> None:
+    out.set([
         {
             "order_id": event.pk["id"],
             "customer": event.after["name"],
@@ -263,7 +266,7 @@ def orders_poll(timer: func.TimerRequest, events: list[RowChange]) -> list[dict]
         }
         for event in events
         if event.after is not None
-    ]
+    ])
 ```
 
 See [`examples/trigger_with_binding/`](examples/trigger_with_binding/) for a complete runnable sample.
