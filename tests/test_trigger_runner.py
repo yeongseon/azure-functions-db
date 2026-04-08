@@ -77,7 +77,11 @@ class FakeSourceAdapter:
 
 def _default_normalizer(record: RawRecord, source: SourceDescriptor) -> RowChange:
     raw_cursor = record.get("updated_at")
-    cursor = raw_cursor if isinstance(raw_cursor, (str, int, float, bool)) or raw_cursor is None else None
+    cursor = (
+        raw_cursor
+        if isinstance(raw_cursor, (str, int, float, bool)) or raw_cursor is None
+        else None
+    )
     return RowChange(
         event_id=f"evt-{record.get('id', 0)}",
         op="upsert",
