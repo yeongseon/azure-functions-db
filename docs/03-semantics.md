@@ -212,7 +212,22 @@ Recommended:
 - Must be routed to a quarantine sink or requires manual checkpoint advance
 - MVP requires operator intervention
 
-## 13. Required User-Facing Disclosure
+## 13. Duplicate and Reprocessing Windows
+
+The following situations produce duplicate or reprocessed events. Handlers MUST be idempotent.
+
+| Window | What Happens | Why | Recommended Handler Behavior |
+|--------|-------------|-----|------------------------------|
+| Handler success, commit failure (Case B) | Batch reprocessed on next tick | Checkpoint not persisted despite handler completing | Use event_id-based deduplication or upsert |
+| Process crash before checkpoint commit (Case E) | Entire batch reprocessed | Crash after fetch/normalize, handler never ran or partially ran | Idempotent side effects or transactional writes |
+| Process crash after partial handler (Case F) | Entire batch reprocessed | Handler partially executed but checkpoint never committed | Idempotent side effects or transactional writes |
+| Lease lost during processing (Case C/H) | Another instance reprocesses same batch | CAS rejects stale commit; new owner starts fresh | Dedupe via processed-event table |
+| Commit timeout / ambiguous (Case G) | Possible duplicate if commit actually succeeded | Response lost; next tick reloads and may re-fetch | Upsert or dedupe at destination |
+| Redeployment / restart | Partial batch re-delivered | New instance starts from last committed checkpoint | Same as Case E/F |
+
+> **Key principle**: azure-functions-db provides **at-least-once** delivery. Handlers must be idempotent. Use event_id, upsert, or a processed-events table to handle duplicates safely.
+
+## 14. Required User-Facing Disclosure
 
 Must be maintained in README / docs / docstrings:
 

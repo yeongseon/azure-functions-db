@@ -101,3 +101,17 @@ MVP baseline:
 - Only known duplicate windows exist
 - Unsupported deletes behave as documented
 - Checkpoint recovery is deterministic
+
+## 7. Failure Matrix Coverage Map
+
+| Case | Description | Covered By |
+|------|------------|------------|
+| A | Handler failure | test_trigger_runner.py (test_handler_failure_*) |
+| B | Handler success, commit failure | test_trigger_runner.py (test_commit_failure_raises) |
+| C | Commit after lease loss | test_hardening.py (test_stale_runner_*) + test_state_blob.py |
+| D | Row updated again | Inherent to cursor polling (no specific test needed) |
+| E | Crash after fetch before handler | test_hardening.py (test_crash_after_fetch_*) |
+| F | Crash after partial handler | test_hardening.py (test_crash_after_partial_*) |
+| G | Commit response timeout | test_hardening.py (test_ambiguous_commit_*) |
+| H | Lease lost before commit | test_hardening.py (test_stale_runner_*) + test_state_blob.py (store-level lease expiry) |
+| I | Permanently failing batch | test_hardening.py (test_permanent_handler_failure_*) |

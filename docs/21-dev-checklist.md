@@ -39,17 +39,17 @@
 - [x] Dashboard examples
 
 ## Phase 6: Release
-- [ ] README quickstart
-- [ ] PyPI metadata
-- [ ] Versioning
-- [ ] Changelog
-- [ ] Release checklist
+- [x] README quickstart
+- [x] PyPI metadata
+- [x] Versioning
+- [x] Changelog
+- [x] Release checklist
 
 ## Phase 7: Hardening
-- [ ] Chaos tests
-- [ ] Crash recovery tests
-- [ ] Duplicate window documentation
-- [ ] Benchmark
+- [x] Chaos tests
+- [x] Crash recovery tests
+- [x] Duplicate window documentation
+- [x] Benchmark
 
 ## Phase 8: Shared Core
 - [ ] DbConfig
