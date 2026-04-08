@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from ..core.errors import DbError
 
-class PollerError(Exception):
+
+class PollerError(DbError):
     pass
 
 

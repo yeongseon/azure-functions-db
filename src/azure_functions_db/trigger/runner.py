@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import inspect
 import logging
 import time
 from typing import Any, Protocol, runtime_checkable
 import uuid
 
-from azure_functions_db.core.types import CursorValue, SourceDescriptor
-from azure_functions_db.observability import (
+from ..core.errors import CursorSerializationError
+from ..core.serializers import parse_checkpoint_cursor
+from ..core.types import CursorValue, RawRecord, SourceDescriptor
+from ..observability import (
     METRIC_BATCH_SIZE,
     METRIC_BATCHES_TOTAL,
     METRIC_COMMIT_DURATION_MS,
@@ -24,8 +26,8 @@ from azure_functions_db.observability import (
     NoOpCollector,
     build_log_fields,
 )
-from azure_functions_db.trigger.context import PollContext
-from azure_functions_db.trigger.errors import (
+from .context import PollContext
+from .errors import (
     CommitError,
     FetchError,
     HandlerError,
@@ -34,12 +36,11 @@ from azure_functions_db.trigger.errors import (
     SerializationError,
     SourceConfigurationError,
 )
-from azure_functions_db.trigger.events import RowChange
-from azure_functions_db.trigger.retry import RetryPolicy
+from .events import RowChange
+from .retry import RetryPolicy
 
 logger = logging.getLogger(__name__)
 
-RawRecord = dict[str, object]
 EventNormalizer = Callable[[RawRecord, SourceDescriptor], RowChange]
 
 
@@ -74,15 +75,12 @@ def _detect_handler_arity(handler: Callable[..., Any]) -> int:
 
 
 def _extract_cursor(checkpoint: dict[str, object]) -> CursorValue | None:
-    raw = checkpoint.get("cursor")
-    if raw is None or isinstance(raw, (str, int, float, bool)):
-        return raw
-    if isinstance(raw, tuple):
-        return raw
-    if isinstance(raw, list):
-        return tuple(raw)
-    msg = f"Unsupported cursor type in checkpoint: {type(raw).__name__}"
-    raise SerializationError(msg)
+    try:
+        return parse_checkpoint_cursor(checkpoint.get("cursor"))
+    except CursorSerializationError as exc:
+        from .errors import SerializationError
+
+        raise SerializationError(str(exc)) from exc
 
 
 class PollRunner:
@@ -144,7 +142,7 @@ class PollRunner:
 
     def tick(self) -> int:
         invocation_id = uuid.uuid4().hex
-        tick_started_at = datetime.now(UTC)
+        tick_started_at = datetime.now(timezone.utc)
         tick_started_monotonic = time.monotonic()
 
         def emit_failure_metrics(exc: Exception, *, source: str | None = None) -> None:
@@ -505,7 +503,7 @@ class PollRunner:
                         if cursor_dt.tzinfo is not None:
                             lag_seconds = max(
                                 0.0,
-                                (datetime.now(UTC) - cursor_dt).total_seconds(),
+                                (datetime.now(timezone.utc) - cursor_dt).total_seconds(),
                             )
                             emit_lag_metric(lag_seconds)
                     except (ValueError, TypeError):
@@ -518,7 +516,7 @@ class PollRunner:
                             if cursor_dt.tzinfo is not None:
                                 lag_seconds = max(
                                     0.0,
-                                    (datetime.now(UTC) - cursor_dt).total_seconds(),
+                                    (datetime.now(timezone.utc) - cursor_dt).total_seconds(),
                                 )
                                 emit_lag_metric(lag_seconds)
                         except (ValueError, TypeError):
@@ -559,7 +557,7 @@ class PollRunner:
             self._safe_emit(
                 lambda: self._metrics.set_gauge(
                     METRIC_LAST_SUCCESS_TIMESTAMP,
-                    datetime.now(UTC).timestamp(),
+                    datetime.now(timezone.utc).timestamp(),
                     labels={"poller_name": self._name},
                 )
             )

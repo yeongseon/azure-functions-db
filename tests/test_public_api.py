@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from azure_functions_db import __all__, __version__
 
 
@@ -10,10 +12,14 @@ def test_public_api_exports() -> None:
         "__version__",
         "BlobCheckpointStore",
         "CommitError",
+        "ConfigurationError",
         "CursorPart",
+        "CursorSerializationError",
         "CursorValue",
+        "DbConfig",
         "DbConnectionError",
         "DbError",
+        "EngineProvider",
         "EventNormalizer",
         "FetchError",
         "FingerprintMismatchError",
@@ -35,6 +41,7 @@ def test_public_api_exports() -> None:
         "MetricsCollector",
         "NoOpCollector",
         "NotFoundError",
+        "parse_checkpoint_cursor",
         "PollContext",
         "PollTrigger",
         "PollRunner",
@@ -42,7 +49,11 @@ def test_public_api_exports() -> None:
         "QueryError",
         "RawRecord",
         "RetryPolicy",
+        "resolve_env_vars",
+        "Row",
+        "RowDict",
         "RowChange",
+        "serialize_cursor_part",
         "SerializationError",
         "SourceAdapter",
         "SourceConfigurationError",
@@ -63,13 +74,19 @@ def test_imports_resolve() -> None:
     from azure_functions_db import (
         METRIC_BATCHES_TOTAL,
         BlobCheckpointStore,
+        ConfigurationError,
+        CursorSerializationError,
+        DbConfig,
+        EngineProvider,
         MetricsCollector,
         NoOpCollector,
         PollContext,
         PollRunner,
         PollTrigger,
         RetryPolicy,
+        Row,
         RowChange,
+        RowDict,
         SourceDescriptor,
         SqlAlchemySource,
         StateStoreError,
@@ -77,9 +94,16 @@ def test_imports_resolve() -> None:
         db,
         default_normalizer,
         make_normalizer,
+        parse_checkpoint_cursor,
+        resolve_env_vars,
+        serialize_cursor_part,
     )
 
     assert BlobCheckpointStore is not None
+    assert ConfigurationError is not None
+    assert CursorSerializationError is not None
+    assert DbConfig is not None
+    assert EngineProvider is not None
     assert METRIC_BATCHES_TOTAL is not None
     assert MetricsCollector is not None
     assert NoOpCollector is not None
@@ -87,6 +111,8 @@ def test_imports_resolve() -> None:
     assert PollTrigger is not None
     assert PollRunner is not None
     assert RetryPolicy is not None
+    assert Row is not None
+    assert RowDict is not None
     assert RowChange is not None
     assert SourceDescriptor is not None
     assert SqlAlchemySource is not None
@@ -95,3 +121,6 @@ def test_imports_resolve() -> None:
     assert db is not None
     assert default_normalizer is not None
     assert make_normalizer is not None
+    assert parse_checkpoint_cursor is not None
+    assert resolve_env_vars is not None
+    assert serialize_cursor_part is not None

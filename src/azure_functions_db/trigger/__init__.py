@@ -1,5 +1,8 @@
-from azure_functions_db.trigger.context import PollContext
-from azure_functions_db.trigger.errors import (
+from __future__ import annotations
+
+from ..core.types import RawRecord
+from .context import PollContext
+from .errors import (
     CommitError,
     FetchError,
     HandlerError,
@@ -9,17 +12,11 @@ from azure_functions_db.trigger.errors import (
     SerializationError,
     SourceConfigurationError,
 )
-from azure_functions_db.trigger.events import RowChange
-from azure_functions_db.trigger.normalizers import default_normalizer, make_normalizer
-from azure_functions_db.trigger.poll import PollTrigger
-from azure_functions_db.trigger.retry import RetryPolicy
-from azure_functions_db.trigger.runner import (
-    EventNormalizer,
-    PollRunner,
-    RawRecord,
-    SourceAdapter,
-    StateStore,
-)
+from .events import RowChange
+from .normalizers import default_normalizer, make_normalizer
+from .poll import PollTrigger
+from .retry import RetryPolicy
+from .runner import EventNormalizer, PollRunner, SourceAdapter, StateStore
 
 __all__ = [
     "CommitError",

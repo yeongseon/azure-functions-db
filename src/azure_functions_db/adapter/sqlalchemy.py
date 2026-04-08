@@ -4,35 +4,27 @@ from collections.abc import Sequence
 import hashlib
 import json
 import logging
-import os
-import re
 from typing import Any
 
-from sqlalchemy import MetaData, Table, and_, create_engine, literal_column, or_, select, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, create_engine
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.sql import and_, literal_column, or_, select, text
 
-from azure_functions_db.core.types import CursorValue, SourceDescriptor
-from azure_functions_db.trigger.errors import FetchError, SourceConfigurationError
-
-RawRecord = dict[str, object]
+from ..core.config import DbConfig, resolve_env_vars
+from ..core.engine import EngineProvider
+from ..core.errors import ConfigurationError
+from ..core.types import CursorValue, RawRecord, SourceDescriptor
+from ..trigger.errors import FetchError, SourceConfigurationError
 
 logger = logging.getLogger(__name__)
 
-_ENV_VAR_PATTERN = re.compile(r"^%(\w+)%$")
-
 
 def _resolve_env_vars(value: str) -> str:
-    """Resolve ``%VAR%`` whole-string pattern to environment variable value."""
-    match = _ENV_VAR_PATTERN.match(value)
-    if match is None:
-        return value
-    var_name = match.group(1)
-    resolved = os.environ.get(var_name)
-    if resolved is None:
-        msg = f"Environment variable '{var_name}' is not set"
-        raise SourceConfigurationError(msg)
-    return resolved
+    try:
+        return resolve_env_vars(value)
+    except ConfigurationError as exc:
+        raise SourceConfigurationError(str(exc)) from exc
 
 
 class SqlAlchemySource:
@@ -78,6 +70,7 @@ class SqlAlchemySource:
         parameters: dict[str, object] | None = None,
         strategy: str = "cursor",
         operation_mode: str = "upsert_only",
+        engine_provider: EngineProvider | None = None,
     ) -> None:
         if not url:
             msg = "url must not be empty"
@@ -113,6 +106,9 @@ class SqlAlchemySource:
         self._parameters = dict(parameters) if parameters else {}
         self._strategy = strategy
         self._operation_mode = operation_mode
+        self._engine_provider = engine_provider
+        self._owns_engine = False
+        self._db_config = DbConfig(connection_url=self._url)
 
         self._engine: Engine | None = None
         self._table: Table | None = None
@@ -128,7 +124,8 @@ class SqlAlchemySource:
     def _compute_name(self) -> str:
         if self._table_name:
             return self._table_name
-        query_hash = hashlib.sha256(self._query.encode()).hexdigest()[:12]  # type: ignore[union-attr]
+        assert self._query is not None  # noqa: S101  # nosec B101
+        query_hash = hashlib.sha256(self._query.encode()).hexdigest()[:12]
         return f"query_{query_hash}"
 
     def _compute_fingerprint(self) -> str:
@@ -171,7 +168,12 @@ class SqlAlchemySource:
             return
 
         try:
-            self._engine = create_engine(self._url)
+            if self._engine_provider is None:
+                self._engine = create_engine(self._url)
+                self._owns_engine = True
+            else:
+                self._engine = self._engine_provider.get_engine(self._db_config)
+                self._owns_engine = False
         except Exception as exc:
             msg = f"Failed to create engine for source '{self._compute_name()}'"
             raise SourceConfigurationError(msg) from exc
@@ -180,9 +182,11 @@ class SqlAlchemySource:
             if self._table_name:
                 self._reflect_table()
         except Exception:
-            self._engine.dispose()
+            if self._engine is not None and self._owns_engine:
+                self._engine.dispose()
             self._engine = None
             self._table = None
+            self._owns_engine = False
             raise
 
         self._initialized = True
@@ -209,6 +213,7 @@ class SqlAlchemySource:
             raise SourceConfigurationError(msg)
 
         self._table = metadata.tables[key]
+        assert self._table is not None  # noqa: S101  # nosec B101
 
         table_columns = {c.name for c in self._table.columns}
         required = {self._cursor_column, *self._pk_columns}
@@ -350,7 +355,9 @@ class SqlAlchemySource:
     def dispose(self) -> None:
         """Dispose the underlying engine and release connection pool."""
         if self._engine is not None:
-            self._engine.dispose()
+            if self._owns_engine:
+                self._engine.dispose()
             self._engine = None
             self._table = None
             self._initialized = False
+            self._owns_engine = False

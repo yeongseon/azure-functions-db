@@ -52,11 +52,11 @@
 - [x] Benchmark
 
 ## Phase 8: Shared Core
-- [ ] DbConfig
-- [ ] EngineProvider (lazy singleton, pool management)
-- [ ] Shared types (Row, RowDict)
-- [ ] Shared error hierarchy refactor
-- [ ] Shared serializers extraction
+- [x] DbConfig
+- [x] EngineProvider (lazy singleton, pool management)
+- [x] Shared types (Row, RowDict)
+- [x] Shared error hierarchy refactor
+- [x] Shared serializers extraction
 
 ## Phase 9: Binding - Input
 - [ ] DbReader

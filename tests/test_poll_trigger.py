@@ -4,12 +4,11 @@ from collections.abc import Sequence
 
 import pytest
 
-from azure_functions_db.core.types import CursorValue, SourceDescriptor
+from azure_functions_db.core.types import CursorValue, RawRecord, SourceDescriptor
 from azure_functions_db.trigger.errors import FetchError, HandlerError
 from azure_functions_db.trigger.events import RowChange
 from azure_functions_db.trigger.normalizers import default_normalizer
 from azure_functions_db.trigger.poll import PollTrigger
-from azure_functions_db.trigger.runner import RawRecord
 from tests.test_trigger_runner import RecordingMetricsCollector
 
 
