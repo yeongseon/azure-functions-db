@@ -27,29 +27,18 @@ _RESERVED_ARGS = frozenset({"timer", "req", "context", "msg", "input", "output"}
 
 class _AsyncDbReaderProxy:
     def __init__(self, reader: DbReader) -> None:
-        self._reader: DbReader = reader
-        self._tasks: set[asyncio.Task[object]] = set()
+        self._reader = reader
 
-    def get(self, *, pk: dict[str, object]) -> asyncio.Task[dict[str, object] | None]:
-        task = asyncio.create_task(asyncio.to_thread(self._reader.get, pk=pk))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
+    async def get(self, *, pk: dict[str, object]) -> dict[str, object] | None:
+        return await asyncio.to_thread(self._reader.get, pk=pk)
 
-    def query(
+    async def query(
         self,
         sql: str,
         *,
         params: dict[str, object] | None = None,
-    ) -> asyncio.Task[list[dict[str, object]]]:
-        task = asyncio.create_task(asyncio.to_thread(self._reader.query, sql, params=params))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
-
-    async def wait(self) -> None:
-        if self._tasks:
-            await asyncio.gather(*tuple(self._tasks))
+    ) -> list[dict[str, object]]:
+        return await asyncio.to_thread(self._reader.query, sql, params=params)
 
     def close(self) -> None:
         self._reader.close()
@@ -57,49 +46,30 @@ class _AsyncDbReaderProxy:
 
 class _AsyncDbWriterProxy:
     def __init__(self, writer: DbWriter) -> None:
-        self._writer: DbWriter = writer
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._writer = writer
 
-    def insert(self, *, data: dict[str, object]) -> asyncio.Task[None]:
-        task = asyncio.create_task(asyncio.to_thread(self._writer.insert, data=data))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
+    async def insert(self, *, data: dict[str, object]) -> None:
+        await asyncio.to_thread(self._writer.insert, data=data)
 
-    def insert_many(self, *, rows: list[dict[str, object]]) -> asyncio.Task[None]:
-        task = asyncio.create_task(asyncio.to_thread(self._writer.insert_many, rows=rows))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
+    async def insert_many(self, *, rows: list[dict[str, object]]) -> None:
+        await asyncio.to_thread(self._writer.insert_many, rows=rows)
 
-    def upsert(self, *, data: dict[str, object], conflict_columns: list[str]) -> asyncio.Task[None]:
-        task = asyncio.create_task(
-            asyncio.to_thread(self._writer.upsert, data=data, conflict_columns=conflict_columns)
+    async def upsert(
+        self, *, data: dict[str, object], conflict_columns: list[str]
+    ) -> None:
+        await asyncio.to_thread(
+            self._writer.upsert, data=data, conflict_columns=conflict_columns
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
 
-    def upsert_many(
+    async def upsert_many(
         self,
         *,
         rows: list[dict[str, object]],
         conflict_columns: list[str],
-    ) -> asyncio.Task[None]:
-        task = asyncio.create_task(
-            asyncio.to_thread(
-                self._writer.upsert_many,
-                rows=rows,
-                conflict_columns=conflict_columns,
-            )
+    ) -> None:
+        await asyncio.to_thread(
+            self._writer.upsert_many, rows=rows, conflict_columns=conflict_columns
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
-
-    async def wait(self) -> None:
-        if self._tasks:
-            await asyncio.gather(*tuple(self._tasks))
 
     def close(self) -> None:
         self._writer.close()
@@ -709,11 +679,7 @@ class DbFunctionApp:
                     proxy = _AsyncDbReaderProxy(reader)
                     try:
                         kwargs[arg_name] = proxy
-                        result = await fn(*args, **kwargs)
-                        if inspect.isawaitable(result):
-                            result = await result
-                        await proxy.wait()
-                        return result
+                        return await fn(*args, **kwargs)
                     finally:
                         reader.close()
 
@@ -791,9 +757,7 @@ class DbFunctionApp:
                     proxy = _AsyncDbWriterProxy(writer)
                     try:
                         kwargs[arg_name] = proxy
-                        result = await fn(*args, **kwargs)
-                        await proxy.wait()
-                        return result
+                        return await fn(*args, **kwargs)
                     finally:
                         writer.close()
 

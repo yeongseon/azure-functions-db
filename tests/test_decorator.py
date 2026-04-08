@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 import pytest
@@ -778,7 +779,7 @@ def test_db_reader_async_proxy_get(tmp_path: Path) -> None:
     _create_users_table(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: object) -> dict[str, object] | None:
+    async def handler(reader: Any) -> dict[str, object] | None:
         return await reader.get(pk={"id": 1})
 
     assert asyncio.run(handler()) == {"id": 1, "name": "Alice"}
@@ -789,7 +790,7 @@ def test_db_reader_async_proxy_query(tmp_path: Path) -> None:
     _create_users_table_with_data(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: object) -> list[dict[str, object]]:
+    async def handler(reader: Any) -> list[dict[str, object]]:
         return await reader.query(
             "SELECT id, name FROM users WHERE active = :active ORDER BY id",
             params={"active": 1},
@@ -850,7 +851,7 @@ def test_db_writer_async_proxy_insert(tmp_path: Path) -> None:
     _create_orders_table(url)
 
     @DbFunctionApp().db_writer("writer", url=url, table="processed_orders")
-    async def handler(writer: object) -> None:
+    async def handler(writer: Any) -> None:
         await writer.insert(data={"id": 1, "status": "processed"})
 
     asyncio.run(handler())
@@ -863,7 +864,7 @@ def test_db_writer_async_proxy_upsert(tmp_path: Path) -> None:
     _create_orders_table(url)
 
     @DbFunctionApp().db_writer("writer", url=url, table="processed_orders")
-    async def handler(writer: object) -> None:
+    async def handler(writer: Any) -> None:
         await writer.upsert(data={"id": 1, "status": "processed"}, conflict_columns=["id"])
 
     asyncio.run(handler())
@@ -1163,8 +1164,8 @@ def test_db_reader_async_injects_reader(tmp_path: Path) -> None:
     _create_users_table(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: DbReader) -> dict[str, object] | None:
-        return reader.get(pk={"id": 1})
+    async def handler(reader: Any) -> dict[str, object] | None:
+        return await reader.get(pk={"id": 1})
 
     assert asyncio.run(handler()) == {"id": 1, "name": "Alice"}
 
@@ -1176,8 +1177,8 @@ def test_db_writer_async_injects_writer(tmp_path: Path) -> None:
     _create_orders_table(url)
 
     @DbFunctionApp().db_writer("writer", url=url, table="processed_orders")
-    async def handler(writer: DbWriter) -> None:
-        writer.insert(data={"id": 1, "status": "async_written"})
+    async def handler(writer: Any) -> None:
+        await writer.insert(data={"id": 1, "status": "async_written"})
 
     asyncio.run(handler())
 

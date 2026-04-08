@@ -225,8 +225,14 @@ class SqlAlchemySource:
 
         insp = sa_inspect(self._engine)
         indexes = insp.get_indexes(self._table_name, schema=self._schema)
-        cursor_indexed = any(
-            self._cursor_column in (idx.get("column_names") or []) for idx in indexes
+        pk_constraint = insp.get_pk_constraint(self._table_name, schema=self._schema) or {}
+        pk_cols = pk_constraint.get("constrained_columns") or []
+        cursor_indexed = (
+            any(
+                self._cursor_column in (idx.get("column_names") or []) for idx in indexes
+            )
+            or self._cursor_column in pk_cols
+            or self._table.c[self._cursor_column].primary_key
         )
         if not cursor_indexed:
             logger.warning(
