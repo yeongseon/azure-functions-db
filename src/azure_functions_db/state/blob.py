@@ -229,7 +229,7 @@ class BlobCheckpointStore:
             "checkpoint": {},
             "lease": {
                 "owner_id": owner_id,
-                "fencing_token": 1,
+                "fencing_token": 1,  # nosec B105
                 "acquired_at": _iso(now),
                 "heartbeat_at": _iso(now),
                 "expires_at": _iso(now + timedelta(seconds=ttl_seconds)),
