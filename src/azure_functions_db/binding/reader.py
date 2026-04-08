@@ -22,6 +22,12 @@ class DbReader:
     for arbitrary SQL queries.  Uses SQLAlchemy Core under the hood and
     integrates with :class:`EngineProvider` for shared connection pooling.
 
+    Thread Safety
+    -------------
+    Instances are **not** safe to share across concurrent threads or
+    async invocations.  Create a separate ``DbReader`` per function
+    invocation, or use a ``with`` block to scope the lifecycle.
+
     Parameters
     ----------
     url:
@@ -71,8 +77,8 @@ class DbReader:
         Parameters
         ----------
         pk:
-            Mapping of column name to value.  All keys must correspond to
-            existing columns in the table.
+            Mapping of primary-key column name to value.  All keys must be
+            actual primary key columns of the table.
 
         Returns
         -------
@@ -128,6 +134,10 @@ class DbReader:
         params: dict[str, object] | None = None,
     ) -> list[dict[str, object]]:
         """Execute a raw SQL query and return all matching rows.
+
+        Always use ``:name`` parameter placeholders and *params* instead of
+        string formatting to prevent SQL injection.  True read-only
+        enforcement should be done at the database role/permission level.
 
         Parameters
         ----------
@@ -250,15 +260,20 @@ class DbReader:
         self._table = metadata.tables[key]
 
     def _validate_pk_columns(self, pk: dict[str, object]) -> None:
-        """Validate that all pk keys correspond to table columns."""
+        """Validate that *pk* keys are actual primary key columns of the table."""
         assert self._table is not None  # noqa: S101  # nosec B101
 
         if not pk:
             msg = "pk must not be empty"
             raise ConfigurationError(msg)
 
-        table_columns = {c.name for c in self._table.columns}
-        unknown = set(pk.keys()) - table_columns
-        if unknown:
-            msg = f"Unknown columns in pk: {sorted(unknown)}"
+        pk_columns = {c.name for c in self._table.primary_key.columns}
+        provided = set(pk.keys())
+
+        invalid = provided - pk_columns
+        if invalid:
+            msg = (
+                f"Columns {sorted(invalid)} are not part of the primary key. "
+                f"Primary key columns: {sorted(pk_columns)}"
+            )
             raise ConfigurationError(msg)

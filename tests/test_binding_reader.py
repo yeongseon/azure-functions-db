@@ -191,8 +191,21 @@ class TestDbReaderGet:
 
     def test_get_unknown_column_raises(self, users_url: str) -> None:
         reader = DbReader(url=users_url, table="users")
-        with pytest.raises(ConfigurationError, match="Unknown columns"):
+        with pytest.raises(ConfigurationError, match="not part of the primary key"):
             reader.get(pk={"nonexistent": 1})
+        reader.close()
+
+    def test_get_non_pk_column_raises(self, users_url: str) -> None:
+        reader = DbReader(url=users_url, table="users")
+        with pytest.raises(ConfigurationError, match="not part of the primary key"):
+            reader.get(pk={"email": "alice@example.com"})
+        reader.close()
+
+    def test_get_partial_composite_pk(self, composite_pk_url: str) -> None:
+        reader = DbReader(url=composite_pk_url, table="order_items")
+        row = reader.get(pk={"order_id": 2})
+        assert row is not None
+        assert cast(int, row["qty"]) == 1
         reader.close()
 
     def test_get_empty_pk_raises(self, users_url: str) -> None:
@@ -208,10 +221,18 @@ class TestDbReaderGet:
         assert reader._initialized
         reader.close()
 
-    def test_get_multiple_matches_raises(self, duplicate_url: str) -> None:
+    def test_get_on_table_without_pk_raises(self, duplicate_url: str) -> None:
         reader = DbReader(url=duplicate_url, table="events")
-        with pytest.raises(QueryError, match="expected at most 1 row"):
+        with pytest.raises(ConfigurationError, match="not part of the primary key"):
             reader.get(pk={"id": 1})
+        reader.close()
+
+    def test_get_partial_pk_multiple_matches_raises(
+        self, composite_pk_url: str
+    ) -> None:
+        reader = DbReader(url=composite_pk_url, table="order_items")
+        with pytest.raises(QueryError, match="expected at most 1 row"):
+            reader.get(pk={"order_id": 1})
         reader.close()
 
     def test_get_with_partial_pk(self, composite_pk_url: str) -> None:
@@ -377,7 +398,7 @@ class TestDbReaderErrorMapping:
         self, users_url: str
     ) -> None:
         reader = DbReader(url=users_url, table="nonexistent_table")
-        with pytest.raises(ConfigurationError, match="not found in database"):
+        with pytest.raises(ConfigurationError, match="Failed to reflect table"):
             reader.get(pk={"id": 1})
 
     def test_engine_disposes_on_reflection_failure(self) -> None:
@@ -403,6 +424,6 @@ class TestDbReaderErrorMapping:
         self, users_url: str
     ) -> None:
         reader = DbReader(url=users_url, table="missing_table")
-        with pytest.raises(ConfigurationError, match="not found in database"):
+        with pytest.raises(ConfigurationError, match="Failed to reflect table"):
             reader.get(pk={"id": 1})
         reader.close()
