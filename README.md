@@ -155,6 +155,53 @@ with DbWriter(url="%DB_URL%", table="orders") as writer:
 
 Supported upsert dialects: PostgreSQL, SQLite, MySQL.
 
+### Combined: Trigger + Binding
+
+Process database changes and write results to another table. Uses `EngineProvider` for shared connection pooling.
+
+```python
+from azure_functions_db import (
+    DbWriter, EngineProvider, PollTrigger, SqlAlchemySource, BlobCheckpointStore,
+)
+
+engine_provider = EngineProvider()
+
+trigger = PollTrigger(
+    name="orders",
+    source=SqlAlchemySource(
+        url="%SOURCE_DB_URL%",
+        table="orders",
+        cursor_column="updated_at",
+        pk_columns=["id"],
+        engine_provider=engine_provider,
+    ),
+    checkpoint_store=BlobCheckpointStore(
+        connection="AzureWebJobsStorage",
+        container="db-state",
+    ),
+)
+
+def process_orders(events):
+    with DbWriter(
+        url="%DEST_DB_URL%", table="processed_orders",
+        engine_provider=engine_provider,
+    ) as writer:
+        for event in events:
+            writer.upsert(
+                data={
+                    "order_id": event.pk["id"],
+                    "customer": event.after["name"],
+                    "processed_at": event.cursor,
+                },
+                conflict_columns=["order_id"],
+            )
+
+# In your Azure Function:
+# trigger.run(timer=timer, handler=process_orders)
+```
+
+See [`examples/trigger_with_binding/`](examples/trigger_with_binding/) for a complete runnable sample.
+
 ## Supported Databases
 
 | Database | Extra | Driver |
