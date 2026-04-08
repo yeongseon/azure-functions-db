@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import inspect
-import logging
-import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+import inspect
+import logging
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
 from azure_functions_db.core.types import CursorValue, SourceDescriptor
 from azure_functions_db.trigger.context import PollContext
