@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from ..core.errors import DbError
 
-class StateStoreError(Exception):
+class StateStoreError(DbError):
     pass
 
 

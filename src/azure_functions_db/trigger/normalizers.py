@@ -1,33 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
-from decimal import Decimal
 import hashlib
 import logging
 import uuid
-from uuid import UUID
 
-from azure_functions_db.core.types import CursorPart, CursorValue, SourceDescriptor
-from azure_functions_db.trigger.events import RowChange
+from ..core.serializers import serialize_cursor_part
+from ..core.types import CursorPart, CursorValue, RawRecord, SourceDescriptor
+from .events import RowChange
 
 logger = logging.getLogger(__name__)
 
-RawRecord = dict[str, object]
 EventNormalizer = Callable[[RawRecord, SourceDescriptor], RowChange]
 
 
 def _cursor_part(value: object) -> CursorPart:
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, UUID):
-        return str(value)
-    msg = f"Unsupported cursor value type: {type(value).__name__}"
-    raise TypeError(msg)
+    return serialize_cursor_part(value)
 
 
 def _compute_event_id(

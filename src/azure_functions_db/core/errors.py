@@ -9,6 +9,10 @@ class DbConnectionError(DbError):
     pass
 
 
+class ConfigurationError(DbError):
+    pass
+
+
 class QueryError(DbError):
     pass
 
@@ -18,4 +22,8 @@ class WriteError(DbError):
 
 
 class NotFoundError(DbError):
+    pass
+
+
+class CursorSerializationError(DbError):
     pass

@@ -33,6 +33,10 @@ Azure Functions Python v2 has no built-in database integration story:
 - **DbReader** — input binding for reading rows *(planned)*
 - **DbWriter** — output binding for writing rows with automatic batching *(planned)*
 
+## Shared Core
+
+`azure-functions-db` now exposes shared infrastructure for upcoming bindings. Use `DbConfig` for normalized connection settings and `EngineProvider` when multiple components should reuse the same lazily created SQLAlchemy engine.
+
 ## Installation
 
 ```bash
