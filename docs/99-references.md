@@ -1,6 +1,6 @@
-# 레퍼런스
+# References
 
-프로젝트 설계 시 참고할 공식 문서.
+Official documentation referenced during project design.
 
 ## Azure Functions
 

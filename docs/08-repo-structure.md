@@ -1,6 +1,6 @@
-# 레포 구조
+# Repository Structure
 
-## 추천 레이아웃
+## Recommended Layout
 
 ```text
 azure-functions-db/
@@ -70,28 +70,28 @@ azure-functions-db/
   schemas/
 ```
 
-## 모듈 책임
+## Module Responsibilities
 
 ### api.py
-public re-export surface. `PollTrigger`, `SqlAlchemySource`, `BlobCheckpointStore`, `DbReader`, `DbWriter`를 노출한다.
+Public re-export surface. Exposes `PollTrigger`, `SqlAlchemySource`, `BlobCheckpointStore`, `DbReader`, `DbWriter`.
 
 ### core/*
-공유 설정, 엔진/pool, 타입, 에러, serializer를 제공하는 공통 계층.
+Common layer providing shared configuration, engine/pool, types, errors, and serializers.
 
 ### trigger/*
-pseudo trigger orchestration 본체. polling, adapter, state, retry, decorator를 포함한다.
+Core pseudo trigger orchestration body. Includes polling, adapters, state, retry, and decorators.
 
 ### trigger/adapters/*
-DB별 change fetch 구현.
+Per-DB change fetch implementations.
 
 ### trigger/state/*
-checkpoint/lease persistence.
+Checkpoint/lease persistence.
 
 ### binding/*
-imperative input/output binding 계층. 함수 invocation 안에서 DB read/write를 수행한다.
+Imperative input/output binding layer. Performs DB read/write within a function invocation.
 
 ### integrations/azure_functions.py
-Azure Functions runtime와의 얇은 glue.
+Thin glue layer for integration with the Azure Functions runtime.
 
 ### cli/main.py
 - validate config
@@ -99,35 +99,35 @@ Azure Functions runtime와의 얇은 glue.
 - reset checkpoint
 - backfill helpers
 
-## import 규칙
+## Import Rules
 
-- `binding`은 `trigger`를 import하지 않는다.
-- `trigger`는 `binding`을 import하지 않는다.
-- `trigger`와 `binding`은 공통 요소를 `core`에서만 가져온다.
-- `trigger/state`는 `trigger/adapters`를 모른다.
-- `integrations`는 `api` 계층만 참조한다.
-- `examples`는 public API만 사용한다.
+- `binding` does not import from `trigger`.
+- `trigger` does not import from `binding`.
+- Both `trigger` and `binding` import shared elements only from `core`.
+- `trigger/state` has no knowledge of `trigger/adapters`.
+- `integrations` references only the `api` layer.
+- `examples` uses only the public API.
 
-## 패키지 분리 전략
+## Package Separation Strategy
 
-코어 패키지:
+Core package:
 - `azure-functions-db`
 
-확장 패키지 후보:
+Extension package candidates:
 - `azure-functions-db-mongo`
 - `azure-functions-db-postgres-cdc`
 - `azure-functions-db-otel`
 - `azure-functions-db-cli`
 
-import 이름:
+Import name:
 - `azure_functions_db`
 
-패키지 전략:
-- trigger와 binding을 하나의 배포판으로 묶어 설치/운영 복잡도를 줄인다.
-- DB별 고급 adapter나 observability 확장은 선택적 별도 패키지로 분리할 수 있다.
+Package strategy:
+- Bundle trigger and binding in a single distribution to reduce installation and operational complexity.
+- Per-DB advanced adapters or observability extensions can be separated into optional packages.
 
-## 버전 정책
+## Versioning Policy
 
-- `0.x`: 빠른 iteration
-- `1.0`: PollTrigger / BlobCheckpointStore / SqlAlchemySource / DbReader / DbWriter 안정화 이후
-- semantic versioning 적용
+- `0.x`: Rapid iteration
+- `1.0`: After stabilization of PollTrigger / BlobCheckpointStore / SqlAlchemySource / DbReader / DbWriter
+- Semantic versioning applied
