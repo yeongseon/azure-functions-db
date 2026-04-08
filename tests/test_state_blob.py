@@ -37,6 +37,8 @@ class _FakeBlobClient:
         self.etag: str | None = None
         self._etag_counter: int = 0
         self.download_error: Exception | None = None
+        self.upload_error: Exception | None = None
+        self._mutate_after_download: bool = False
 
     def download_blob(self, **kwargs: Any) -> _FakeDownloader:
         if self.download_error is not None:
@@ -45,7 +47,13 @@ class _FakeBlobClient:
             from azure.core.exceptions import ResourceNotFoundError
 
             raise ResourceNotFoundError("Blob not found")
-        return _FakeDownloader(self.content, self.etag or "")
+        downloader = _FakeDownloader(self.content, self.etag or "")
+        if self._mutate_after_download:
+            # Simulate another writer modifying the blob between read and write
+            self._etag_counter += 1
+            self.etag = f"etag-{self._etag_counter}"
+            self._mutate_after_download = False
+        return downloader
 
     def upload_blob(
         self,
@@ -60,6 +68,9 @@ class _FakeBlobClient:
             HttpResponseError,
             ResourceExistsError,
         )
+
+        if self.upload_error is not None:
+            raise self.upload_error
 
         data_bytes = data if isinstance(data, bytes) else data.encode()
 
@@ -201,17 +212,26 @@ class TestBlobCheckpointStoreAcquireLease:
         # First acquire creates the blob
         store.acquire_lease("test_poller", 120)
 
-        # Expire the lease
+        # Expire the lease so acquire tries to steal
+        state = _read_blob_state(container, "test_poller")
+        state["lease"]["expires_at"] = (
+            datetime.now(UTC) - timedelta(minutes=10)
+        ).isoformat()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.content = json.dumps(state).encode()
+
+        # Simulate another writer between our read and write
+        blob._mutate_after_download = True
+
+        with pytest.raises(LeaseConflictError, match="CAS conflict"):
+            store.acquire_lease("test_poller", 120)
+
+        # Expire the lease and simulate another CAS race
         state = _read_blob_state(container, "test_poller")
         state["lease"]["expires_at"] = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
         blob = container.get_blob_client("state/test_poller.json")
         blob.content = json.dumps(state).encode()
-        # Don't update etag — simulate that _read_state gets a stale etag
-        # but another writer updates in between
-
-        # Mutate etag to simulate external write
-        blob._etag_counter += 1
-        blob.etag = f"etag-{blob._etag_counter}"
+        blob._mutate_after_download = True
 
         with pytest.raises(LeaseConflictError, match="CAS conflict"):
             store.acquire_lease("test_poller", 120)
@@ -306,10 +326,9 @@ class TestBlobCheckpointStoreRenewLease:
         store, container = _make_store()
         lease_id = store.acquire_lease("test_poller", 120)
 
-        # Mutate etag to simulate external write
+        # Simulate another writer between our read and write
         blob = container.get_blob_client("state/test_poller.json")
-        blob._etag_counter += 100
-        blob.etag = f"etag-{blob._etag_counter}"
+        blob._mutate_after_download = True
 
         with pytest.raises(LostLeaseError, match="CAS conflict"):
             store.renew_lease("test_poller", lease_id, 120)
@@ -343,13 +362,24 @@ class TestBlobCheckpointStoreReleaseLease:
         with pytest.raises(LostLeaseError, match="owner mismatch"):
             store.release_lease("test_poller", "wrong-owner:1")
 
+    def test_release_succeeds_when_lease_expired(self) -> None:
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        # Manually expire the lease — release should still work
+        state = _read_blob_state(container, "test_poller")
+        state["lease"]["expires_at"] = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.content = json.dumps(state).encode()
+
+        store.release_lease("test_poller", lease_id)
+
     def test_release_raises_lost_lease_on_412(self) -> None:
         store, container = _make_store()
         lease_id = store.acquire_lease("test_poller", 120)
 
         blob = container.get_blob_client("state/test_poller.json")
-        blob._etag_counter += 100
-        blob.etag = f"etag-{blob._etag_counter}"
+        blob._mutate_after_download = True
 
         with pytest.raises(LostLeaseError, match="CAS conflict"):
             store.release_lease("test_poller", lease_id)
@@ -425,9 +455,9 @@ class TestBlobCheckpointStoreCommitCheckpoint:
         store, container = _make_store()
         lease_id = store.acquire_lease("test_poller", 120)
 
+        # Simulate another writer between our read and write
         blob = container.get_blob_client("state/test_poller.json")
-        blob._etag_counter += 100
-        blob.etag = f"etag-{blob._etag_counter}"
+        blob._mutate_after_download = True
 
         with pytest.raises(LostLeaseError, match="CAS conflict"):
             store.commit_checkpoint("test_poller", {"cursor": 1}, lease_id)
@@ -494,3 +524,238 @@ class TestEffectiveGrace:
 
     def test_boundary_ttl(self) -> None:
         assert _effective_grace(10) == 5.0
+
+
+class TestParseLeaseId:
+    def test_missing_colon_raises_value_error(self) -> None:
+        from azure_functions_db.state.blob import _parse_lease_id
+
+        with pytest.raises(ValueError, match="Invalid lease_id format"):
+            _parse_lease_id("no-colon-here")
+
+    def test_non_integer_token_raises_value_error(self) -> None:
+        from azure_functions_db.state.blob import _parse_lease_id
+
+        with pytest.raises(ValueError, match="Invalid fencing_token"):
+            _parse_lease_id("owner:abc")
+
+    def test_valid_lease_id(self) -> None:
+        from azure_functions_db.state.blob import _parse_lease_id
+
+        owner, token = _parse_lease_id("my-owner:42")
+        assert owner == "my-owner"
+        assert token == 42
+
+
+class TestMalformedLeaseIdInMethods:
+    def test_renew_with_malformed_lease_id(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(ValueError, match="Invalid lease_id format"):
+            store.renew_lease("test_poller", "bad-lease-id", 120)
+
+    def test_release_with_malformed_lease_id(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(ValueError, match="Invalid lease_id format"):
+            store.release_lease("test_poller", "bad-lease-id")
+
+    def test_commit_with_malformed_lease_id(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(ValueError, match="Invalid lease_id format"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, "bad-lease-id")
+
+
+class TestCorruptState:
+    def test_unexpected_download_error_wraps_to_state_store_error(self) -> None:
+        store, container = _make_store()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.download_error = RuntimeError("unexpected SDK error")
+
+        with pytest.raises(StateStoreError, match="Unexpected error reading"):
+            store.load_checkpoint("test_poller")
+
+    def test_auth_error_on_write_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import ClientAuthenticationError
+
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = ClientAuthenticationError("auth failed on write")
+
+        with pytest.raises(StateStoreError, match="Failed to write"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, lease_id)
+
+    def test_transport_error_on_write_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import ServiceRequestError
+
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = ServiceRequestError("network error on write")
+
+        with pytest.raises(StateStoreError, match="Failed to write"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, lease_id)
+
+    def test_unexpected_upload_error_wraps_to_state_store_error(self) -> None:
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = RuntimeError("unexpected upload error")
+
+        with pytest.raises(StateStoreError, match="Unexpected error writing"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, lease_id)
+
+    def test_auth_error_on_create_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import ClientAuthenticationError
+
+        store, container = _make_store()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = ClientAuthenticationError("auth failed on create")
+
+        with pytest.raises(StateStoreError, match="Failed to create"):
+            store.acquire_lease("test_poller", 120)
+
+    def test_transport_error_on_create_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import ServiceRequestError
+
+        store, container = _make_store()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = ServiceRequestError("network error on create")
+
+        with pytest.raises(StateStoreError, match="Failed to create"):
+            store.acquire_lease("test_poller", 120)
+
+    def test_unexpected_error_on_create_wraps_to_state_store_error(self) -> None:
+        store, container = _make_store()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = RuntimeError("unexpected create error")
+
+        with pytest.raises(StateStoreError, match="Unexpected error creating"):
+            store.acquire_lease("test_poller", 120)
+
+
+class TestVerifyLeaseEdgeCases:
+    def test_verify_raises_when_no_lease_in_state(self) -> None:
+        store, container = _make_store()
+        _seed_blob(container, "test_poller", _make_state())
+        state = _read_blob_state(container, "test_poller")
+        del state["lease"]
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.content = json.dumps(state).encode()
+
+        with pytest.raises(LostLeaseError, match="No lease present"):
+            store.renew_lease("test_poller", "owner:1", 120)
+
+
+class TestMissingSourceFingerprint:
+    def test_load_succeeds_when_stored_fingerprint_is_none(self) -> None:
+        store, container = _make_store(fingerprint="fp_test")
+        state = _make_state(fingerprint="fp_test")
+        del state["source_fingerprint"]
+        _seed_blob(container, "test_poller", state)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.content = json.dumps(state).encode()
+
+        result = store.load_checkpoint("test_poller")
+        assert isinstance(result, dict)
+
+
+class TestStateStoreErrorFallbackPaths:
+    def test_acquire_non_412_http_error_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        store, container = _make_store()
+        expired_at = datetime.now(UTC) - timedelta(minutes=10)
+        _seed_blob(container, "test_poller", _make_state(expires_at=expired_at))
+
+        blob = container.get_blob_client("state/test_poller.json")
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.reason = "Internal Server Error"
+        blob.upload_error = HttpResponseError(
+            message="Internal Server Error", response=resp
+        )
+
+        with pytest.raises(StateStoreError, match="Failed to acquire"):
+            store.acquire_lease("test_poller", 120)
+
+    def test_renew_non_412_http_error_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.reason = "Internal Server Error"
+        blob.upload_error = HttpResponseError(
+            message="Internal Server Error", response=resp
+        )
+
+        with pytest.raises(StateStoreError, match="Failed to renew"):
+            store.renew_lease("test_poller", lease_id, 120)
+
+    def test_release_non_412_http_error_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.reason = "Internal Server Error"
+        blob.upload_error = HttpResponseError(
+            message="Internal Server Error", response=resp
+        )
+
+        with pytest.raises(StateStoreError, match="Failed to release"):
+            store.release_lease("test_poller", lease_id)
+
+    def test_commit_non_412_http_error_wraps_to_state_store_error(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        store, container = _make_store()
+        lease_id = store.acquire_lease("test_poller", 120)
+
+        blob = container.get_blob_client("state/test_poller.json")
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.reason = "Internal Server Error"
+        blob.upload_error = HttpResponseError(
+            message="Internal Server Error", response=resp
+        )
+
+        with pytest.raises(StateStoreError, match="Failed to commit"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, lease_id)
+
+    def test_renew_on_missing_blob_raises_lost_lease(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(LostLeaseError, match="State blob not found"):
+            store.renew_lease("test_poller", "owner:1", 120)
+
+    def test_release_on_missing_blob_raises_lost_lease(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(LostLeaseError, match="State blob not found"):
+            store.release_lease("test_poller", "owner:1")
+
+    def test_commit_on_missing_blob_raises_lost_lease(self) -> None:
+        store, _container = _make_store()
+        with pytest.raises(LostLeaseError, match="State blob not found"):
+            store.commit_checkpoint("test_poller", {"cursor": 1}, "owner:1")
+
+
+class TestAcquireCreateRace:
+    def test_acquire_create_conflict_raises_lease_conflict(self) -> None:
+        from azure.core.exceptions import ResourceExistsError
+
+        store, container = _make_store()
+        blob = container.get_blob_client("state/test_poller.json")
+        blob.upload_error = ResourceExistsError("Already exists")
+
+        with pytest.raises(LeaseConflictError, match="Another instance"):
+            store.acquire_lease("test_poller", 120)

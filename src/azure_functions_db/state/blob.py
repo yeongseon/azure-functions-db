@@ -345,9 +345,11 @@ class BlobCheckpointStore:
         """Release the lease by setting ``expires_at`` to now.
 
         Preserves the fencing token so the next acquisition increments it.
+        Only owner_id and fencing_token are verified — expiry is intentionally
+        skipped so that a holder can still release a lease that has nominally
+        expired but has not yet been stolen.
 
-        Raises ``LostLeaseError`` if the lease is not held by this caller
-        or the CAS write fails.
+        Raises ``LostLeaseError`` if owner/token do not match or CAS fails.
         """
         owner_id, fencing_token = _parse_lease_id(lease_id)
         result = self._read_state(poller_name)
@@ -356,7 +358,19 @@ class BlobCheckpointStore:
             raise LostLeaseError(f"State blob not found for poller '{poller_name}'")
 
         state, etag = result
-        self._verify_lease(state, owner_id, fencing_token)
+
+        lease = state.get("lease")
+        if lease is None:
+            raise LostLeaseError("No lease present in state")
+        if lease.get("owner_id") != owner_id:
+            raise LostLeaseError(
+                f"Lease owner mismatch: expected '{owner_id}', found '{lease.get('owner_id')}'"
+            )
+        if lease.get("fencing_token") != fencing_token:
+            raise LostLeaseError(
+                f"Fencing token mismatch: expected {fencing_token}, "
+                f"found {lease.get('fencing_token')}"
+            )
 
         state["lease"]["expires_at"] = _iso(_now_utc())
 
