@@ -436,7 +436,7 @@ def test_db_input_invalid_model_raises(model: type[object]) -> None:
             url="sqlite:///unused.db",
             table="users",
             pk={"id": 1},
-            model=model,
+            model=model,  # type: ignore[arg-type]
         )
 
 
@@ -779,7 +779,7 @@ def test_db_reader_async_proxy_get(tmp_path: Path) -> None:
     _create_users_table(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: Any) -> dict[str, object] | None:
+    async def handler(reader: Any) -> Any:
         return await reader.get(pk={"id": 1})
 
     assert asyncio.run(handler()) == {"id": 1, "name": "Alice"}
@@ -790,7 +790,7 @@ def test_db_reader_async_proxy_query(tmp_path: Path) -> None:
     _create_users_table_with_data(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: Any) -> list[dict[str, object]]:
+    async def handler(reader: Any) -> Any:
         return await reader.query(
             "SELECT id, name FROM users WHERE active = :active ORDER BY id",
             params={"active": 1},
@@ -1164,7 +1164,7 @@ def test_db_reader_async_injects_reader(tmp_path: Path) -> None:
     _create_users_table(url)
 
     @DbFunctionApp().db_reader("reader", url=url, table="users")
-    async def handler(reader: Any) -> dict[str, object] | None:
+    async def handler(reader: Any) -> Any:
         return await reader.get(pk={"id": 1})
 
     assert asyncio.run(handler()) == {"id": 1, "name": "Alice"}
