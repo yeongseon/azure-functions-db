@@ -262,7 +262,7 @@ class SqlAlchemySource:
 
         subq = text(self._query).columns().subquery("source")
 
-        stmt = select(literal_column("*")).select_from(subq)
+        stmt: Any = select(literal_column("*")).select_from(subq)
 
         conditions = []
         if cursor is not None:
@@ -275,7 +275,7 @@ class SqlAlchemySource:
         if conditions:
             stmt = stmt.where(and_(*conditions))
 
-        order_cols = [literal_column(f"source.{self._cursor_column}")] + [
+        order_cols: list[Any] = [literal_column(f"source.{self._cursor_column}")] + [
             literal_column(f"source.{pk}") for pk in self._pk_columns
         ]
         stmt = stmt.order_by(*order_cols)
@@ -294,7 +294,7 @@ class SqlAlchemySource:
     def _build_cursor_filter_subquery(self, cursor: CursorValue) -> Any:
         """Build lexicographic cursor predicate for raw-query mode."""
         cols_values = self._cursor_cols_values(cursor)
-        col_exprs = [literal_column(f"source.{name}") for name, _ in cols_values]
+        col_exprs: list[Any] = [literal_column(f"source.{name}") for name, _ in cols_values]
         vals = [val for _, val in cols_values]
         return self._build_or_and_expansion(col_exprs, vals)
 
