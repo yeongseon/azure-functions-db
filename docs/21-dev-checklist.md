@@ -75,7 +75,7 @@
 - [x] Integration tests (SQLite)
 
 ## Phase 11: Binding Integration
-- [ ] Trigger + output binding combined example
-- [ ] Binding decorator sugar (optional)
-- [ ] Docs update
-- [ ] Sample function_app.py with binding
+- [x] Trigger + output binding combined example
+- [ ] Binding decorator sugar (future: API redesign)
+- [x] Docs update
+- [x] Sample function_app.py with binding
