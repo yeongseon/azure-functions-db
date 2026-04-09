@@ -95,8 +95,6 @@ def upsert_db(
 
 
 @pytest.fixture()
-@pytest.mark.integration
-@pytest.mark.mssql
 def mssql_db(tmp_path: Path) -> Generator[tuple[str, Engine], None, None]:
     url = _resolve_url("mssql", tmp_path, "test_writer_mssql.db")
 
