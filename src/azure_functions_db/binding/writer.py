@@ -5,12 +5,13 @@ from types import TracebackType
 from typing import Any
 
 from sqlalchemy.engine import Engine, create_engine
-from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.schema import Table
 from sqlalchemy.sql import and_, delete, update
 
 from ..core.config import DbConfig, resolve_env_vars
 from ..core.engine import EngineProvider
 from ..core.errors import ConfigurationError, DbConnectionError, WriteError
+from ..core.metadata import get_metadata_cache
 
 logger = logging.getLogger(__name__)
 
@@ -261,27 +262,24 @@ class DbWriter:
     def _reflect_table(self) -> None:
         assert self._engine is not None  # noqa: S101  # nosec B101
 
-        metadata = MetaData()
+        cache = get_metadata_cache()
         try:
-            metadata.reflect(
-                bind=self._engine,
+            table = cache.get_or_reflect(
+                engine=self._engine,
+                url=self._url,
                 schema=self._schema,
-                only=[self._table_name],
+                table_name=self._table_name,
             )
         except Exception as exc:
             msg = f"Failed to reflect table '{self._table_name}'"
             raise ConfigurationError(msg) from exc
 
-        key = (
-            f"{self._schema}.{self._table_name}"
-            if self._schema
-            else self._table_name
-        )
-        if key not in metadata.tables:
+        key = f"{self._schema}.{self._table_name}" if self._schema else self._table_name
+        if table is None:
             msg = f"Table '{key}' not found in database"
             raise ConfigurationError(msg)
 
-        self._table = metadata.tables[key]
+        self._table = table
 
     def _validate_data_columns(self, data: dict[str, object]) -> None:
         assert self._table is not None  # noqa: S101  # nosec B101
@@ -350,9 +348,7 @@ class DbWriter:
         assert self._table is not None  # noqa: S101  # nosec B101
 
         dialect = self._engine.dialect.name
-        update_columns = {
-            k: v for k, v in data.items() if k not in conflict_columns
-        }
+        update_columns = {k: v for k, v in data.items() if k not in conflict_columns}
 
         if dialect in ("postgresql", "sqlite"):
             return self._build_pg_sqlite_upsert(data, conflict_columns, update_columns)
@@ -435,7 +431,5 @@ class DbWriter:
             )
         else:
             first_col = list(data.keys())[0]
-            stmt = stmt.on_duplicate_key_update(
-                **{first_col: stmt.inserted[first_col]}
-            )
+            stmt = stmt.on_duplicate_key_update(**{first_col: stmt.inserted[first_col]})
         return stmt

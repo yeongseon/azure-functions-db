@@ -5,12 +5,13 @@ from types import TracebackType
 from typing import Any
 
 from sqlalchemy.engine import Engine, create_engine
-from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.schema import Table
 from sqlalchemy.sql import and_, select, text
 
 from ..core.config import DbConfig, resolve_env_vars
 from ..core.engine import EngineProvider
 from ..core.errors import ConfigurationError, DbConnectionError, QueryError
+from ..core.metadata import get_metadata_cache
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +120,7 @@ class DbReader:
             return None
 
         if len(rows) > 1:
-            msg = (
-                f"get() expected at most 1 row but found multiple matches "
-                f"for pk={pk}"
-            )
+            msg = f"get() expected at most 1 row but found multiple matches for pk={pk}"
             raise QueryError(msg)
 
         return rows[0]
@@ -237,27 +235,24 @@ class DbReader:
         assert self._engine is not None  # noqa: S101  # nosec B101
         assert self._table_name is not None  # noqa: S101  # nosec B101
 
-        metadata = MetaData()
+        cache = get_metadata_cache()
         try:
-            metadata.reflect(
-                bind=self._engine,
+            table = cache.get_or_reflect(
+                engine=self._engine,
+                url=self._url,
                 schema=self._schema,
-                only=[self._table_name],
+                table_name=self._table_name,
             )
         except Exception as exc:
             msg = f"Failed to reflect table '{self._table_name}'"
             raise ConfigurationError(msg) from exc
 
-        key = (
-            f"{self._schema}.{self._table_name}"
-            if self._schema
-            else self._table_name
-        )
-        if key not in metadata.tables:
+        key = f"{self._schema}.{self._table_name}" if self._schema else self._table_name
+        if table is None:
             msg = f"Table '{key}' not found in database"
             raise ConfigurationError(msg)
 
-        self._table = metadata.tables[key]
+        self._table = table
 
     def _validate_pk_columns(self, pk: dict[str, object]) -> None:
         """Validate that *pk* keys exactly match the table's primary key columns."""

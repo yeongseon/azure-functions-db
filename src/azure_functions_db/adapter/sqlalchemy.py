@@ -9,12 +9,13 @@ from typing import Any
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, create_engine
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.schema import Table
 from sqlalchemy.sql import and_, literal_column, or_, select, text
 
 from ..core.config import DbConfig, resolve_env_vars
 from ..core.engine import EngineProvider
 from ..core.errors import ConfigurationError
+from ..core.metadata import get_metadata_cache
 from ..core.types import CursorValue, RawRecord, SourceDescriptor
 from ..trigger.errors import FetchError, SourceConfigurationError
 
@@ -197,23 +198,24 @@ class SqlAlchemySource:
         assert self._engine is not None  # noqa: S101  # nosec B101
         assert self._table_name is not None  # noqa: S101  # nosec B101
 
-        metadata = MetaData()
+        cache = get_metadata_cache()
         try:
-            metadata.reflect(
-                bind=self._engine,
+            table = cache.get_or_reflect(
+                engine=self._engine,
+                url=self._url,
                 schema=self._schema,
-                only=[self._table_name],
+                table_name=self._table_name,
             )
         except Exception as exc:
             msg = f"Failed to reflect table '{self._table_name}'"
             raise SourceConfigurationError(msg) from exc
 
         key = f"{self._schema}.{self._table_name}" if self._schema else self._table_name
-        if key not in metadata.tables:
+        if table is None:
             msg = f"Table '{key}' not found in database"
             raise SourceConfigurationError(msg)
 
-        self._table = metadata.tables[key]
+        self._table = table
         assert self._table is not None  # noqa: S101  # nosec B101
 
         table_columns = {c.name for c in self._table.columns}
@@ -228,9 +230,7 @@ class SqlAlchemySource:
         pk_constraint = insp.get_pk_constraint(self._table_name, schema=self._schema) or {}
         pk_cols = pk_constraint.get("constrained_columns") or []
         cursor_indexed = (
-            any(
-                self._cursor_column in (idx.get("column_names") or []) for idx in indexes
-            )
+            any(self._cursor_column in (idx.get("column_names") or []) for idx in indexes)
             or self._cursor_column in pk_cols
             or self._table.c[self._cursor_column].primary_key
         )
