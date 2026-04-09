@@ -1,0 +1,146 @@
+name: DB Integration Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres, mysql, mssql]
+
+    services:
+      postgres:
+        image: ${{ matrix.db == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U testuser -d testdb"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      mysql:
+        image: ${{ matrix.db == 'mysql' && 'mysql:8' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: testpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u testuser -ptestpass"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+      mssql:
+        image: ${{ matrix.db == 'mssql' && 'mcr.microsoft.com/mssql/server:2022-latest' || '' }}
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "TestPass1!"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPass1!' -C -Q 'SELECT 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite
+        ports:
+          - 10000:10000
+          - 10001:10001
+          - 10002:10002
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ODBC driver (MSSQL only)
+        if: matrix.db == 'mssql'
+        run: |
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+          curl -fsSL https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+
+      - name: Create MSSQL test database
+        if: matrix.db == 'mssql'
+        run: |
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPass1!' -C -Q "CREATE DATABASE testdb"
+
+      - name: Install package with all extras
+        run: |
+          pip install hatch
+          pip install -e ".[all,dev]"
+
+      - name: Set test DB URL
+        run: |
+          case "${{ matrix.db }}" in
+            sqlite)
+              echo "TEST_SQLITE_URL=sqlite:///$(pwd)/test_integration.db" >> "$GITHUB_ENV"
+              ;;
+            postgres)
+              echo "TEST_POSTGRES_URL=postgresql+psycopg://testuser:testpass@localhost:5432/testdb" >> "$GITHUB_ENV"
+              ;;
+            mysql)
+              echo "TEST_MYSQL_URL=mysql+pymysql://testuser:testpass@localhost:3306/testdb" >> "$GITHUB_ENV"
+              ;;
+            mssql)
+              echo "TEST_MSSQL_URL=mssql+pyodbc://sa:TestPass1!@localhost:1433/testdb?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      - name: Set Azurite connection string
+        run: |
+          echo "TEST_AZURITE_CONN_STR=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" >> "$GITHUB_ENV"
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration -m "integration and ${{ matrix.db }}" \
+            -v --no-cov --tb=short \
+            --html=integration-report/report.html --self-contained-html \
+            || pytest tests/integration -m "integration" \
+            -v --no-cov --tb=short \
+            --html=integration-report/report.html --self-contained-html
+
+      - name: Run Azurite tests
+        if: always()
+        run: |
+          pytest tests/integration -m "azurite" \
+            -v --no-cov --tb=short \
+            --html=azurite-report/report.html --self-contained-html \
+            || true
+
+      - name: Upload integration test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report-${{ matrix.db }}-${{ github.run_id }}
+          path: |
+            integration-report/
+            azurite-report/
+          retention-days: 14

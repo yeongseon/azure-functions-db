@@ -55,6 +55,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+    "pytest-html",
     "ruff==0.15.7",
 ]
 docs = [
@@ -128,6 +129,16 @@ follow_imports = "skip"
 addopts = "--cov=src/azure_functions_db --cov-report=xml --cov-report=term-missing -ra -q"
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+markers = [
+    "integration: live database integration tests (require running DB)",
+    "host_e2e: Function host smoke tests (require func start)",
+    "azure_e2e: Azure-deployed smoke tests (require Azure resources)",
+    "postgres: tests that require PostgreSQL",
+    "mysql: tests that require MySQL",
+    "mssql: tests that require SQL Server",
+    "sqlite: tests that use SQLite",
+    "azurite: tests that require Azurite storage emulator",
+]
 
 [tool.coverage.run]
 branch = true
