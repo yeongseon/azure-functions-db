@@ -63,16 +63,16 @@ jobs:
           --health-timeout=5s
           --health-retries=10
 
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite
-        ports:
-          - 10000:10000
-          - 10001:10001
-          - 10002:10002
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Start Azurite with skipApiVersionCheck
+        run: |
+          npm install -g azurite
+          azurite --skipApiVersionCheck --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 &
+          sleep 3
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
