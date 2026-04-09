@@ -15,7 +15,7 @@ from .core.errors import (
     WriteError,
 )
 from .core.types import CursorPart, CursorValue
-from .decorator import DbBindings, DbOut
+from .decorator import DbBindings, DbOut, get_db_metadata
 from .observability import (
     MetricsCollector,
 )
@@ -53,6 +53,7 @@ __all__ = [
     "MetricsCollector",
     "NotFoundError",
     "DbOut",
+    "get_db_metadata",
     "PollContext",
     "PollTrigger",
     "QueryError",

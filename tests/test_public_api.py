@@ -36,6 +36,7 @@ def test_public_api_exports() -> None:
         "RowChange",
         "SqlAlchemySource",
         "WriteError",
+        "get_db_metadata",
     }
     assert set(__all__) == expected
 
@@ -68,6 +69,7 @@ def test_imports_resolve() -> None:
         RowChange,
         SqlAlchemySource,
         WriteError,
+        get_db_metadata,
     )
 
     assert BlobCheckpointStore is not None
@@ -84,6 +86,7 @@ def test_imports_resolve() -> None:
     assert DbWriter is not None
     assert EngineProvider is not None
     assert FetchError is not None
+    assert get_db_metadata is not None
     assert HandlerError is not None
     assert LeaseAcquireError is not None
     assert LostLeaseError is not None

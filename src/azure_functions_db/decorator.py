@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Parameter names reserved by Azure Functions runtime.
 _RESERVED_ARGS = frozenset({"timer", "req", "context", "msg", "input", "output"})
 _DB_DECORATOR_ATTR = "_db_decorators"
+_TOOLKIT_META_ATTR = "_azure_functions_toolkit_metadata"
 
 
 class DbOut:
@@ -158,6 +159,28 @@ def _get_db_decorators(fn: Callable[..., Any]) -> frozenset[str]:
 
 def _mark_decorator(fn: Callable[..., Any], name: str) -> None:
     setattr(fn, _DB_DECORATOR_ATTR, _get_db_decorators(fn) | {name})
+
+
+def _merge_toolkit_metadata(
+    fn: Callable[..., Any], namespace: str, payload: dict[str, Any],
+) -> None:
+    """Merge toolkit metadata into the convention attribute, preserving other namespaces."""
+    existing: dict[str, Any] = getattr(fn, _TOOLKIT_META_ATTR, {})
+    if not isinstance(existing, dict):
+        existing = {}
+
+    if namespace in existing and isinstance(existing[namespace], dict):
+        old = existing[namespace]
+        merged_payload = {**payload}
+        if "bindings" in old and "bindings" in payload:
+            merged_payload["bindings"] = old["bindings"] + payload["bindings"]
+        if "injections" in old and "injections" in payload:
+            merged_payload["injections"] = old["injections"] + payload["injections"]
+        existing = {**existing, namespace: merged_payload}
+    else:
+        existing = {**existing, namespace: payload}
+
+    setattr(fn, _TOOLKIT_META_ATTR, existing)
 
 
 def _check_composition(fn: Callable[..., Any], name: str) -> None:
@@ -497,6 +520,20 @@ class DbBindings:
             # db-injected params (events, context).
             setattr(wrapper, "__signature__", _build_host_signature(fn, db_injected))
             _mark_decorator(wrapper, "trigger")
+            _merge_toolkit_metadata(
+                wrapper,
+                "db",
+                {
+                    "version": 1,
+                    "bindings": [
+                        {
+                            "kind": "trigger",
+                            "parameter": arg_name,
+                        }
+                    ],
+                    "injections": [],
+                },
+            )
 
             return wrapper
 
@@ -610,6 +647,16 @@ class DbBindings:
 
             is_async = inspect.iscoroutinefunction(fn)
 
+            binding_info: dict[str, Any] = {
+                "kind": "input",
+                "parameter": arg_name,
+                "connection_setting": url,
+                "resource": {"table": table} if table else {},
+                "query_kind": "pk" if use_pk else "text",
+            }
+            if model is not None:
+                binding_info["model_ref"] = f"{model.__module__}:{model.__qualname__}"
+
             def _resolve_read_args(
                 all_kwargs: dict[str, Any],
             ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
@@ -675,6 +722,15 @@ class DbBindings:
 
                 setattr(async_wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
                 _mark_decorator(async_wrapper, "input")
+                _merge_toolkit_metadata(
+                    async_wrapper,
+                    "db",
+                    {
+                        "version": 1,
+                        "bindings": [binding_info],
+                        "injections": [],
+                    },
+                )
                 return async_wrapper
 
             @functools.wraps(fn)
@@ -686,6 +742,15 @@ class DbBindings:
 
             setattr(wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
             _mark_decorator(wrapper, "input")
+            _merge_toolkit_metadata(
+                wrapper,
+                "db",
+                {
+                    "version": 1,
+                    "bindings": [binding_info],
+                    "injections": [],
+                },
+            )
             return wrapper
 
         return decorator
@@ -763,6 +828,22 @@ class DbBindings:
 
                 setattr(async_wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
                 _mark_decorator(async_wrapper, "output")
+                _merge_toolkit_metadata(
+                    async_wrapper,
+                    "db",
+                    {
+                        "version": 1,
+                        "bindings": [
+                            {
+                                "kind": "output",
+                                "parameter": arg_name,
+                                "connection_setting": url,
+                                "resource": {"table": table},
+                            }
+                        ],
+                        "injections": [],
+                    },
+                )
                 return async_wrapper
 
             @functools.wraps(fn)
@@ -772,6 +853,22 @@ class DbBindings:
 
             setattr(wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
             _mark_decorator(wrapper, "output")
+            _merge_toolkit_metadata(
+                wrapper,
+                "db",
+                {
+                    "version": 1,
+                    "bindings": [
+                        {
+                            "kind": "output",
+                            "parameter": arg_name,
+                            "connection_setting": url,
+                            "resource": {"table": table},
+                        }
+                    ],
+                    "injections": [],
+                },
+            )
             return wrapper
 
         return decorator
@@ -840,6 +937,15 @@ class DbBindings:
 
                 setattr(async_wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
                 _mark_decorator(async_wrapper, "inject_reader")
+                _merge_toolkit_metadata(
+                    async_wrapper,
+                    "db",
+                    {
+                        "version": 1,
+                        "bindings": [],
+                        "injections": [{"kind": "reader", "parameter": arg_name}],
+                    },
+                )
                 return async_wrapper
 
             @functools.wraps(fn)
@@ -858,6 +964,15 @@ class DbBindings:
 
             setattr(wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
             _mark_decorator(wrapper, "inject_reader")
+            _merge_toolkit_metadata(
+                wrapper,
+                "db",
+                {
+                    "version": 1,
+                    "bindings": [],
+                    "injections": [{"kind": "reader", "parameter": arg_name}],
+                },
+            )
             return wrapper
 
         return decorator
@@ -922,6 +1037,15 @@ class DbBindings:
 
                 setattr(async_wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
                 _mark_decorator(async_wrapper, "inject_writer")
+                _merge_toolkit_metadata(
+                    async_wrapper,
+                    "db",
+                    {
+                        "version": 1,
+                        "bindings": [],
+                        "injections": [{"kind": "writer", "parameter": arg_name}],
+                    },
+                )
                 return async_wrapper
 
             @functools.wraps(fn)
@@ -940,6 +1064,28 @@ class DbBindings:
 
             setattr(wrapper, "__signature__", _build_host_signature(fn, {arg_name}))
             _mark_decorator(wrapper, "inject_writer")
+            _merge_toolkit_metadata(
+                wrapper,
+                "db",
+                {
+                    "version": 1,
+                    "bindings": [],
+                    "injections": [{"kind": "writer", "parameter": arg_name}],
+                },
+            )
             return wrapper
 
         return decorator
+
+
+def get_db_metadata(func: Any) -> dict[str, Any] | None:
+    """Return db metadata if the function was decorated with DbBindings decorators.
+
+    Returns None if the function has no db metadata attached.
+    """
+    toolkit_meta = getattr(func, _TOOLKIT_META_ATTR, None)
+    if isinstance(toolkit_meta, dict):
+        db_meta = toolkit_meta.get("db")
+        if isinstance(db_meta, dict):
+            return db_meta
+    return None
