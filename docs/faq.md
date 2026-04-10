@@ -8,18 +8,18 @@
 corresponding extra: `azure-functions-db[postgres]`, `azure-functions-db[mysql]`,
 or `azure-functions-db[mssql]`.
 
-**Any SQLAlchemy dialect**: The bindings and `SqlAlchemySource` work with any
-database that has a SQLAlchemy driver — Oracle, CockroachDB, SQLite, DuckDB, etc.
+**Any SQLAlchemy dialect**: The bindings and `SqlAlchemySource` are designed to work with
+any database that has a SQLAlchemy driver — Oracle, CockroachDB, SQLite, DuckDB, etc.
 Install the driver (`pip install oracledb`), use the SQLAlchemy connection URL,
-and you're set. Only the built-in extras are tested in CI; other dialects work
-through SQLAlchemy compatibility.
+and you're set. The built-in extras are the tested path; other dialects work
+through SQLAlchemy compatibility. Exact connection URL syntax varies by driver.
 
 ### How do I use my own database?
 
 Three steps:
 
 1. **Install the driver** — for example `pip install oracledb` for Oracle
-2. **Use the SQLAlchemy connection URL** — `url="oracle+oracledb://user:pass@host/db"`
+2. **Use the SQLAlchemy connection URL** — e.g. `url="oracle+oracledb://user:pass@host/db"` (exact format varies by driver)
 3. **Pass engine options if needed** — use `engine_kwargs` for driver-specific settings
 
 This works for bindings (`input`, `output`, `inject_reader`, `inject_writer`)
