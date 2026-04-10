@@ -4,9 +4,30 @@
 
 ### What databases are supported?
 
-PostgreSQL, MySQL, and SQL Server via SQLAlchemy dialect drivers. Install the
+**Built-in extras** (driver included): PostgreSQL, MySQL, and SQL Server. Install the
 corresponding extra: `azure-functions-db[postgres]`, `azure-functions-db[mysql]`,
 or `azure-functions-db[mssql]`.
+
+**Any SQLAlchemy dialect**: The bindings and `SqlAlchemySource` are designed to work with
+any database that has a SQLAlchemy driver — Oracle, CockroachDB, SQLite, DuckDB, etc.
+Install the driver (`pip install oracledb`), use the SQLAlchemy connection URL,
+and you're set. The built-in extras are the tested path; other dialects work
+through SQLAlchemy compatibility. Exact connection URL syntax varies by driver.
+
+### How do I use my own database?
+
+Three steps:
+
+1. **Install the driver** — for example `pip install oracledb` for Oracle
+2. **Use the SQLAlchemy connection URL** — e.g. `url="oracle+oracledb://user:pass@host/db"` (exact format varies by driver)
+3. **Pass engine options if needed** — use `engine_kwargs` for driver-specific settings
+
+This works for bindings (`input`, `output`, `inject_reader`, `inject_writer`)
+and for `SqlAlchemySource`-based triggers.
+
+If your data source does not have a SQLAlchemy dialect (e.g. MongoDB, Kafka),
+implement the `SourceAdapter` protocol and pass it to `db.trigger(source=...)`.
+See [Adapter SDK](05-adapter-sdk.md) for details.
 
 ### Is this an official Microsoft package?
 

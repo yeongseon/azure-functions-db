@@ -1,5 +1,7 @@
 # Adapter SDK
 
+> **Most users don't need this document.** If your database has a SQLAlchemy dialect, just install the driver and use the connection URL — bindings and `SqlAlchemySource` usually do not require a custom adapter. This document is for developers building adapters for databases that cannot be reached through SQLAlchemy.
+
 This document defines the internal and external extension contract for developers adding DB adapters.
 
 ## 1. Purpose
