@@ -33,6 +33,54 @@ Azure Functions Python v2 has no built-in database integration story:
 - **Data injection** — `input` injects query results directly; `output` auto-writes return values
 - **Client injection** — `inject_reader`/`inject_writer` for imperative control when needed
 
+## Choose your integration path
+
+| Path | When to use | What to do |
+|------|-------------|------------|
+| **Built-in extras** | PostgreSQL, MySQL, or SQL Server | `pip install azure-functions-db[postgres]` and go |
+| **Bring your own SQLAlchemy database** | Oracle, CockroachDB, DuckDB, or any other RDBMS with a SQLAlchemy dialect | Install the driver, use the SQLAlchemy connection URL |
+| **Custom trigger source** | Non-SQL sources (MongoDB, Kafka, REST APIs) | Implement the `SourceAdapter` Protocol |
+
+### Bring your own database
+
+The bindings and `SqlAlchemySource` work with **any database that has a SQLAlchemy dialect**. The built-in extras just bundle common drivers for convenience.
+
+Three steps:
+
+1. **Install the driver** — e.g. `pip install oracledb` for Oracle
+2. **Use the SQLAlchemy URL** — e.g. `url="oracle+oracledb://user:pass@host/db"`
+3. **Pass engine options if needed** — use `engine_kwargs` for driver-specific settings
+
+```python
+from azure_functions_db import DbBindings
+
+db = DbBindings()
+
+@db.input("rows", url="oracle+oracledb://user:pass@host:1521/mydb",
+          query="SELECT * FROM orders WHERE status = :status",
+          params={"status": "pending"})
+def read_oracle_orders(rows: list[dict]) -> None:
+    for row in rows:
+        print(row)
+```
+
+The same applies to triggers — `SqlAlchemySource` accepts any SQLAlchemy URL:
+
+```python
+source = SqlAlchemySource(
+    url="oracle+oracledb://user:pass@host:1521/mydb",
+    table="orders",
+    cursor_column="updated_at",
+    pk_columns=["id"],
+)
+```
+
+> **Note:** Only the built-in extras (PostgreSQL, MySQL, SQL Server) are tested in CI. Other dialects work through SQLAlchemy compatibility but are not explicitly tested by this project.
+
+### Custom trigger source
+
+If your data source has no SQLAlchemy dialect, implement the [`SourceAdapter`](docs/05-adapter-sdk.md) protocol and pass it directly to `db.trigger(source=...)`. See the [Adapter SDK](docs/05-adapter-sdk.md) for the full contract.
+
 ## Shared Core
 
 `azure-functions-db` now exposes shared infrastructure for upcoming bindings. Use `DbConfig` for normalized connection settings and `EngineProvider` when multiple components should reuse the same lazily created SQLAlchemy engine.
@@ -271,13 +319,17 @@ def orders_poll(timer: func.TimerRequest, events: list[RowChange], out: DbOut) -
 
 See [`examples/trigger_with_binding/`](examples/trigger_with_binding/) for a complete runnable sample.
 
-## Supported Databases
+## Built-in Extras
+
+These databases have pre-packaged driver dependencies. Install the matching extra and you're ready to go.
 
 | Database | Extra | Driver |
 |----------|-------|--------|
 | PostgreSQL | `azure-functions-db[postgres]` | [psycopg](https://www.psycopg.org/) |
 | MySQL | `azure-functions-db[mysql]` | [PyMySQL](https://pymysql.readthedocs.io/) |
 | SQL Server | `azure-functions-db[mssql]` | [pyodbc](https://github.com/mkleehammer/pyodbc) |
+
+Any other database with a [SQLAlchemy dialect](https://docs.sqlalchemy.org/en/20/dialects/) works too — just install the driver yourself. See [Choose your integration path](#choose-your-integration-path).
 
 ## Scope
 
