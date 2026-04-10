@@ -51,7 +51,7 @@ def _read_all(engine: Engine, table_name: str) -> list[dict[str, object]]:
 
 
 def _rows_by_id(engine: Engine) -> dict[int, dict[str, object]]:
-    return {int(row["id"]): row for row in _read_all(engine, "users")}
+    return {int(str(row["id"])): row for row in _read_all(engine, "users")}
 
 
 @pytest.fixture(params=_WRITER_DBS)
