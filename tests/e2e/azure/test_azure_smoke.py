@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 
 import pytest
 import requests
@@ -21,12 +22,12 @@ SKIP_REASON = "E2E_BASE_URL not set — skipping Azure e2e tests"
 pytestmark = pytest.mark.azure_e2e
 
 
-def _get(path: str, **kwargs: object) -> requests.Response:
-    return requests.get(f"{BASE_URL}{path}", timeout=30, **kwargs)  # type: ignore[arg-type]
+def _get(path: str, **kwargs: Any) -> requests.Response:
+    return requests.get(f"{BASE_URL}{path}", timeout=30, **kwargs)
 
 
-def _post(path: str, **kwargs: object) -> requests.Response:
-    return requests.post(f"{BASE_URL}{path}", timeout=30, **kwargs)  # type: ignore[arg-type]
+def _post(path: str, **kwargs: Any) -> requests.Response:
+    return requests.post(f"{BASE_URL}{path}", timeout=30, **kwargs)
 
 
 @pytest.fixture(scope="session", autouse=True)
