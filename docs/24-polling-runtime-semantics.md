@@ -404,6 +404,11 @@ supports idempotency keys (Stripe, many message brokers, custom HTTP APIs).
 
 ## 10. Operational Checklist
 
+A short summary is below. The **full pre-deployment checklist** — including
+runbook items, observability alert thresholds, and pool-configuration
+checks — lives in
+[Production Checklist — Polling Trigger](26-polling-production-checklist.md).
+
 Before promoting a `db.trigger` to production:
 
 - [ ] Confirm `lease_ttl_seconds > p99 handler duration + commit time + 30s`.
@@ -422,6 +427,8 @@ Before promoting a `db.trigger` to production:
 
 ## 11. See Also
 
+- [Production Checklist — Polling Trigger](26-polling-production-checklist.md) —
+  full pre-deployment checklist with runbook items.
 - [Semantics](03-semantics.md) — formal delivery contract, ordering, cursor,
   failure matrix.
 - [Checkpoint / Lease Spec](06-checkpoint-lease-spec.md) — on-disk state
