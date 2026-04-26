@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import logging
 from types import TracebackType
 from typing import Any
 
-from sqlalchemy.engine import Engine, create_engine
+from sqlalchemy.engine import Connection, Engine, create_engine
 from sqlalchemy.schema import Table
 from sqlalchemy.sql import and_, delete, update
 
@@ -62,6 +64,71 @@ class DbWriter:
         self._table: Table | None = None
         self._owns_engine = False
         self._initialized = False
+        self._tx_conn: Connection | None = None
+
+    @contextmanager
+    def transaction(self) -> Iterator[DbWriter]:
+        """Group multiple write operations into a single SQL transaction.
+
+        Inside the ``with`` block, every call to ``insert``, ``insert_many``,
+        ``upsert``, ``upsert_many``, ``update``, and ``delete`` executes on
+        the same connection and shares one transaction.  The transaction is
+        committed on normal exit and rolled back if any exception leaves
+        the block.
+
+        Nested ``transaction()`` calls on the same writer are not supported
+        and raise :class:`WriteError`.
+
+        Example
+        -------
+        >>> with writer.transaction():
+        ...     writer.insert(data={"id": 1, "status": "pending"})
+        ...     writer.update(data={"status": "shipped"}, pk={"id": 1})
+
+        Raises
+        ------
+        WriteError
+            If a transaction is already active on this writer, if the
+            connection cannot be acquired, or if commit fails.  The
+            original exception is preserved as the cause when applicable.
+        """
+        if self._tx_conn is not None:
+            msg = (
+                "transaction() is already active on this writer; "
+                "nested transactions are not supported"
+            )
+            raise WriteError(msg)
+
+        self._ensure_initialized()
+        assert self._engine is not None  # noqa: S101  # nosec B101
+
+        try:
+            conn = self._engine.connect()
+        except Exception as exc:
+            msg = "Failed to acquire connection for transaction"
+            raise WriteError(msg) from exc
+
+        tx = conn.begin()
+        self._tx_conn = conn
+        try:
+            yield self
+        except BaseException:
+            try:
+                tx.rollback()
+            finally:
+                self._tx_conn = None
+                conn.close()
+            raise
+        else:
+            try:
+                tx.commit()
+            except Exception as exc:
+                self._tx_conn = None
+                conn.close()
+                msg = "Failed to commit transaction"
+                raise WriteError(msg) from exc
+            self._tx_conn = None
+            conn.close()
 
     def insert(self, *, data: dict[str, object]) -> None:
         """Insert a single row.
@@ -76,7 +143,7 @@ class DbWriter:
         self._validate_data_columns(data)
 
         try:
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 conn.execute(self._table.insert().values(**data))
         except (ConfigurationError, WriteError):
             raise
@@ -97,7 +164,7 @@ class DbWriter:
             self._validate_data_columns(row)
 
         try:
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 conn.execute(self._table.insert(), rows)
         except (ConfigurationError, WriteError):
             raise
@@ -125,7 +192,7 @@ class DbWriter:
 
         try:
             stmt = self._build_upsert_stmt(data, conflict_columns)
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 conn.execute(stmt)
         except (ConfigurationError, WriteError):
             raise
@@ -152,7 +219,7 @@ class DbWriter:
         self._validate_conflict_columns(conflict_columns)
 
         try:
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 for row in rows:
                     stmt = self._build_upsert_stmt(row, conflict_columns)
                     conn.execute(stmt)
@@ -177,7 +244,7 @@ class DbWriter:
         try:
             conditions = [self._table.c[col] == val for col, val in pk.items()]
             stmt: Any = update(self._table).where(and_(*conditions)).values(**data)
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 conn.execute(stmt)
         except (ConfigurationError, WriteError):
             raise
@@ -199,7 +266,7 @@ class DbWriter:
         try:
             conditions = [self._table.c[col] == val for col, val in pk.items()]
             stmt: Any = delete(self._table).where(and_(*conditions))
-            with self._engine.begin() as conn:
+            with self._execution_scope() as conn:
                 conn.execute(stmt)
         except (ConfigurationError, WriteError):
             raise
@@ -209,6 +276,16 @@ class DbWriter:
 
     def close(self) -> None:
         """Release resources held by this writer."""
+        if self._tx_conn is not None:
+            tx_conn = self._tx_conn
+            self._tx_conn = None
+            try:
+                tx_conn.close()
+            except Exception:
+                logger.warning(
+                    "Failed to close active transaction connection on writer.close()",
+                    exc_info=True,
+                )
         if self._engine is not None:
             if self._owns_engine:
                 self._engine.dispose()
@@ -231,6 +308,24 @@ class DbWriter:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def _execution_scope(self) -> Iterator[Connection]:
+        """Yield a connection for a single write operation.
+
+        Inside ``transaction()`` the writer reuses the active transactional
+        connection so all operations share one commit/rollback boundary.
+        Outside, each operation gets its own short-lived ``engine.begin()``
+        transaction, preserving the previous behavior.
+        """
+        assert self._engine is not None  # noqa: S101  # nosec B101
+
+        if self._tx_conn is not None:
+            yield self._tx_conn
+            return
+
+        with self._engine.begin() as conn:
+            yield conn
 
     def _ensure_initialized(self) -> None:
         if self._initialized:

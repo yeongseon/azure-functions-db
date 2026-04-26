@@ -171,6 +171,174 @@ class DbReader:
             msg = "Failed to execute query"
             raise QueryError(msg) from exc
 
+    def scalar(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> object | None:
+        """Execute a SQL query and return a single scalar value.
+
+        Convenience wrapper around :meth:`query` for queries such as
+        ``SELECT COUNT(*) FROM ...`` or ``SELECT MAX(updated_at) FROM ...``.
+
+        Returns the first column of the first row, or ``None`` if no rows
+        match.  Raises :class:`QueryError` if the query returns more than
+        one row.
+
+        Parameters
+        ----------
+        sql:
+            SQL query string.  Use ``:name`` placeholders for parameters.
+        params:
+            Optional mapping of parameter names to values.
+
+        Returns
+        -------
+        object or None
+            The single scalar value, or ``None`` if no rows match.
+
+        Raises
+        ------
+        QueryError
+            If the query execution fails or returns multiple rows.
+        """
+        self._ensure_initialized()
+        assert self._engine is not None  # noqa: S101  # nosec B101
+
+        try:
+            stmt = text(sql)
+            with self._engine.connect() as conn:
+                if params:
+                    result = conn.execute(stmt, params)
+                else:
+                    result = conn.execute(stmt)
+                rows = result.fetchmany(2)
+        except (ConfigurationError, QueryError):
+            raise
+        except Exception as exc:
+            msg = "Failed to execute scalar query"
+            raise QueryError(msg) from exc
+
+        if not rows:
+            return None
+        if len(rows) > 1:
+            msg = "scalar() expected at most 1 row but the query returned multiple rows"
+            raise QueryError(msg)
+        # First column of the single row.
+        first_row = rows[0]
+        if hasattr(first_row, "_mapping"):
+            mapping: dict[str, object] = dict(first_row._mapping)
+            if not mapping:
+                return None
+            value: object = next(iter(mapping.values()))
+            return value
+        # Defensive fallback: row is a plain tuple-like.
+        if len(first_row):
+            fallback: object = first_row[0]
+            return fallback
+        return None
+
+    def one(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Execute a SQL query and return exactly one row.
+
+        Convenience wrapper around :meth:`query` for queries that must
+        return a single row.
+
+        Parameters
+        ----------
+        sql:
+            SQL query string.  Use ``:name`` placeholders for parameters.
+        params:
+            Optional mapping of parameter names to values.
+
+        Returns
+        -------
+        dict
+            The single matching row as a dict.
+
+        Raises
+        ------
+        QueryError
+            If the query execution fails, returns zero rows, or returns
+            more than one row.
+        """
+        rows = self._fetch_at_most_two(sql, params)
+        if not rows:
+            msg = "one() expected exactly 1 row but the query returned no rows"
+            raise QueryError(msg)
+        if len(rows) > 1:
+            msg = "one() expected exactly 1 row but the query returned multiple rows"
+            raise QueryError(msg)
+        return rows[0]
+
+    def one_or_none(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        """Execute a SQL query and return one row or ``None``.
+
+        Convenience wrapper around :meth:`query` for queries that must
+        return zero or one row.
+
+        Parameters
+        ----------
+        sql:
+            SQL query string.  Use ``:name`` placeholders for parameters.
+        params:
+            Optional mapping of parameter names to values.
+
+        Returns
+        -------
+        dict or None
+            The single matching row as a dict, or ``None`` if no rows
+            match.
+
+        Raises
+        ------
+        QueryError
+            If the query execution fails or returns more than one row.
+        """
+        rows = self._fetch_at_most_two(sql, params)
+        if not rows:
+            return None
+        if len(rows) > 1:
+            msg = "one_or_none() expected at most 1 row but the query returned multiple rows"
+            raise QueryError(msg)
+        return rows[0]
+
+    def _fetch_at_most_two(
+        self,
+        sql: str,
+        params: dict[str, object] | None,
+    ) -> list[dict[str, object]]:
+        """Execute *sql* and return up to two rows as dicts."""
+        self._ensure_initialized()
+        assert self._engine is not None  # noqa: S101  # nosec B101
+
+        try:
+            stmt = text(sql)
+            with self._engine.connect() as conn:
+                if params:
+                    result = conn.execute(stmt, params)
+                else:
+                    result = conn.execute(stmt)
+                rows = result.fetchmany(2)
+        except (ConfigurationError, QueryError):
+            raise
+        except Exception as exc:
+            msg = "Failed to execute query"
+            raise QueryError(msg) from exc
+
+        return [dict(row._mapping) for row in rows]
+
     def close(self) -> None:
         """Release resources held by this reader.
 
