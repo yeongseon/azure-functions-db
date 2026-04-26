@@ -25,13 +25,18 @@ CREATE TRIGGER orders_set_updated_at
     BEFORE INSERT OR UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Idempotent destination table.
--- The trigger handler upserts on order_id so re-delivery (at-least-once)
--- collapses into a no-op write of identical data.
+-- Strictly-idempotent destination table.
+-- The composite primary key (order_id, source_cursor) ensures that a
+-- replay of the same RowChange (at-least-once delivery) collides on the
+-- exact same row and is a no-op upsert. Keying on order_id alone would
+-- be a latest-state projection: replays still hit the same row, but an
+-- out-of-order replay of an older event could overwrite a newer state.
 CREATE TABLE IF NOT EXISTS processed_orders (
-    order_id      BIGINT PRIMARY KEY,
+    order_id      BIGINT NOT NULL,
+    source_cursor TIMESTAMPTZ NOT NULL,
     customer_name TEXT NOT NULL,
     amount        NUMERIC(12, 2) NOT NULL,
     status        TEXT NOT NULL,
-    processed_at  TIMESTAMPTZ NOT NULL
+    processed_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (order_id, source_cursor)
 );

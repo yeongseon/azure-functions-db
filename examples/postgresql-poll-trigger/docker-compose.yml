@@ -33,7 +33,9 @@ services:
     volumes:
       - azurite-data:/data
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "10000"]
+      test:
+        - CMD-SHELL
+        - 'node -e "require(''net'').createConnection(10000, ''127.0.0.1'').on(''connect'', () => process.exit(0)).on(''error'', () => process.exit(1))"'
       interval: 5s
       timeout: 3s
       retries: 10

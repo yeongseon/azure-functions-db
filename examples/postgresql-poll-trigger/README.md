@@ -99,12 +99,17 @@ In another terminal:
 
 ```bash
 psql "postgresql://app:app@localhost:5432/app" <<'SQL'
-INSERT INTO orders (id, customer_name, amount, status)
-VALUES (1, 'Alice', 99.99, 'pending'),
-       (2, 'Bob',   49.50, 'pending');
+-- Let BIGSERIAL allocate the ids; inserting explicit values does not
+-- advance the sequence and would collide with later auto-id inserts.
+INSERT INTO orders (customer_name, amount, status)
+VALUES ('Alice', 99.99, 'pending'),
+       ('Bob',   49.50, 'pending');
 
--- Wait for the next tick, then update one row to see another event:
-UPDATE orders SET status = 'shipped', amount = 109.99 WHERE id = 1;
+-- Wait for the next tick, then update one row to see another event.
+-- Identifying by customer_name keeps this snippet runnable without
+-- knowing the assigned ids.
+UPDATE orders SET status = 'shipped', amount = 109.99
+ WHERE customer_name = 'Alice';
 SQL
 ```
 
@@ -120,8 +125,14 @@ Verify the projection table:
 
 ```bash
 psql "postgresql://app:app@localhost:5432/app" -c \
-  "SELECT order_id, customer_name, amount, processed_at FROM processed_orders ORDER BY order_id;"
+  "SELECT order_id, source_cursor, customer_name, amount, status FROM processed_orders ORDER BY order_id, source_cursor;"
 ```
+
+You should see one row per delivered event — the initial insert produces
+one row, and the subsequent `UPDATE` produces another row with the same
+`order_id` but a later `source_cursor`. This is the strictly-idempotent
+projection pattern: replays of the same `RowChange` collide on
+`(order_id, source_cursor)` and are no-op upserts.
 
 Verify the checkpoint blob:
 
@@ -163,17 +174,34 @@ preconditions:
 
 ## Idempotent handler pattern
 
-`function_app.py` writes to `processed_orders` with
-`action="upsert"` and `conflict_columns=["order_id"]`. Because the
+`function_app.py` writes to `processed_orders` with `action="upsert"`
+and `conflict_columns=["order_id", "source_cursor"]`. Because the
 polling trigger is at-least-once, the same `RowChange` may be redelivered
 during commit failures, lease transitions, or process crashes
 (see [§4 Duplicate Window Reference](../../docs/24-polling-runtime-semantics.md#4-duplicate-window-reference)).
-The upsert collides on `order_id` and the replay becomes a no-op write of
-identical data.
+The composite key `(event.pk, event.cursor)` ensures the replay collides
+on the exact same row with byte-identical column values, so the second
+write is a true no-op.
 
-If your sink does not natively support upsert, swap the `@db.output` for an
-`inject_writer`-based handler that maintains a `processed_events` table
-keyed by `(event.pk, event.cursor)`.
+### When latest-state projection is what you want
+
+If you only need the *current* state per `order_id` (last write wins),
+key on `order_id` alone — e.g. drop `source_cursor` from the primary key
+and from `conflict_columns`. That's a simpler, smaller table, but be
+aware that:
+
+- An out-of-order replay of an older event can overwrite a newer
+  projection.
+- "Replay = no-op" only holds when the replay carries the same column
+  values as the previous delivery; for true event-level dedup, prefer
+  the composite-key pattern above.
+
+### When upsert is not available
+
+If your sink does not natively support upsert, swap the `@db.output`
+for an `inject_writer`-based handler that maintains a
+`processed_events` table keyed by `(event.pk, event.cursor)` with a
+unique constraint, and swallow the unique-violation on replay.
 
 ## Checkpoint container configuration
 
