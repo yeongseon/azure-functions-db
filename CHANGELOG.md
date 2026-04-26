@@ -4,10 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- Align distribution name with PyPI publish name (azure-functions-db) (#92) 
+- Declare wheel packages explicitly for hatchling (#91) 
+
+### Documentation
+
+- Reposition README against official Azure SQL bindings (#93) (#96) 
+
+### Other
+
+- Bump version to 0.2.2 
+
+### Testing
+
+- Bump expected __version__ to 0.2.2 ahead of release 
+
+### Bug Fixes
+
+- Remove stale site/ artifacts and fix broken issue template URL 
+
+### Documentation
+
+- Replace text-only binding flow with accurate Mermaid diagrams 
+
+### Miscellaneous Tasks
+
+- *(deps)* Bump actions/upload-artifact from 4 to 7 
+- *(deps)* Bump github/codeql-action from 4.35.1 to 4.35.2 
+- *(deps)* Bump mypy from 1.20.0 to 1.20.1 
+- *(deps)* Bump actions/setup-python from 5 to 6 
+- *(deps)* Bump actions/github-script from 8.0.0 to 9.0.0 
+- *(deps)* Bump softprops/action-gh-release from 2.6.1 to 3.0.0 
+- *(deps)* Bump actions/checkout from 4 to 6 
+- Update repo references for azure-functions-{feature}-python naming convention 
+
+### Bug Fixes
+
 - Resolve mypy errors in e2e and integration tests (#73) 
 
 ### Documentation
 
+- Update changelog 
 - Add BYOD example apps (Oracle DB) (#76) 
 - Clarify that any SQLAlchemy-compatible database works (#75) 
 - Standardize ecosystem table in README 
