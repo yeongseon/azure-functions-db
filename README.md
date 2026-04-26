@@ -9,7 +9,10 @@
 [![Docs](https://img.shields.io/badge/docs-gh--pages-blue)](https://yeongseon.github.io/azure-functions-db-python/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Database integration for **Azure Functions Python v2** — trigger, input/output bindings, and change detection for **any database with a SQLAlchemy dialect**.
+SQLAlchemy-powered database integration helpers for **Azure Functions Python v2** — binding-style decorators for input/output/client injection and a poll-based pseudo trigger that works with **any database that ships a SQLAlchemy dialect**.
+
+> **Not a native Azure Functions binding extension.**
+> This package does **not** register native Azure Functions bindings with the Functions host. The `@db.input` / `@db.output` / `@db.trigger` decorators are Python function wrappers that resolve data, inject writers, or poll for changes around your handler. For runtime-native Azure SQL bindings, use the official extension (see below).
 
 ---
 
@@ -18,20 +21,54 @@ Part of the **Azure Functions Python DX Toolkit**
 
 ## Why this exists
 
-Azure Functions Python v2 has no built-in database integration story:
+Microsoft already ships [official Azure SQL bindings](https://learn.microsoft.com/azure/azure-functions/functions-bindings-azure-sql) — including a [SQL trigger](https://learn.microsoft.com/azure/azure-functions/functions-bindings-azure-sql-trigger) backed by SQL Change Tracking — for **Azure SQL Database** and **SQL Server**. If those cover your scenario, prefer them.
 
-- **No DB trigger** — unlike Cosmos DB, there is no native trigger for relational databases
-- **No input/output bindings** — no declarative way to read or write DB rows from a function
-- **Driver confusion** — each database requires different drivers, connection strings, and setup
-- **No change detection** — polling, CDC, or outbox patterns must be built from scratch every time
+This package fills a different gap. Python teams on Azure Functions still have to hand-roll integration when they need:
+
+- **No generic SQLAlchemy trigger** — the official SQL bindings target Azure SQL / SQL Server only.
+- **No unified multi-dialect binding layer** — PostgreSQL, MySQL, SQLite, Oracle, DuckDB, CockroachDB, and other SQLAlchemy dialects each require custom code.
+- **No SQLAlchemy-native reader/writer injection pattern** for the Python v2 programming model.
+- **No first-class polling primitive** — checkpoint, lease, batching, idempotency, and at-least-once delivery built on top of the existing timer trigger.
+
+## When to use this
+
+Use **`azure-functions-db`** when:
+
+- You need PostgreSQL, MySQL, SQLite, Oracle, DuckDB, CockroachDB, or another SQLAlchemy dialect.
+- You want Python decorator-based input / output / client injection that maps cleanly onto v2 handlers.
+- You want timer-driven polling with checkpoint and lease control instead of a host-managed trigger extension.
+- You want local-first, testable DB integration without depending on a native Functions extension.
+
+Use the **official Azure SQL bindings** when:
+
+- You target Azure SQL Database or SQL Server.
+- You want a runtime-native SQL trigger / input binding / output binding registered with the Functions host.
+- You rely on SQL Change Tracking and extension-managed scaling for your trigger source.
 
 ## What it does
 
-- **Pseudo DB trigger** — poll-based change detection with checkpoint, lease, and at-least-once delivery
-- **Any SQLAlchemy database** — PostgreSQL, MySQL, SQL Server out of the box; Oracle, CockroachDB, DuckDB, and [any other dialect](https://docs.sqlalchemy.org/en/20/dialects/) with one extra `pip install`
-- **Single `pip install`** — one package with optional extras for each database driver
-- **Data injection** — `input` injects query results directly; `output` auto-writes return values
-- **Client injection** — `inject_reader`/`inject_writer` for imperative control when needed
+- **Poll-based pseudo trigger** — change detection via cursor-column polling, with checkpoint, lease, batching, and at-least-once delivery on top of an Azure Functions timer trigger.
+- **Any SQLAlchemy database** — PostgreSQL, MySQL, SQL Server out of the box; Oracle, CockroachDB, DuckDB, and [any other dialect](https://docs.sqlalchemy.org/en/20/dialects/) with one extra `pip install`.
+- **Single `pip install`** — one package with optional extras for the common database drivers.
+- **Input-style data injection** — `@db.input` resolves query results and passes them to your handler.
+- **Output-style writer injection** — `@db.output` injects a `DbOut` writer; you call `.set(...)` to write explicitly.
+- **Client injection** — `@db.inject_reader` / `@db.inject_writer` provide imperative `DbReader` / `DbWriter` clients for multi-statement reads or transactional writes.
+
+## Compared with official Azure SQL bindings
+
+| Capability                              | Official Azure SQL bindings                       | `azure-functions-db`                              |
+| --------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| Azure SQL / SQL Server                  | Native, runtime-managed                           | Supported via SQLAlchemy + pyodbc                 |
+| PostgreSQL                              | Not supported                                     | Built-in extra (`[postgres]`)                     |
+| MySQL                                   | Not supported                                     | Built-in extra (`[mysql]`)                        |
+| SQLite                                  | Not supported                                     | Supported via SQLAlchemy                          |
+| Oracle / DuckDB / CockroachDB           | Not supported                                     | BYOD — install dialect, pass SQLAlchemy URL       |
+| Custom non-SQL source                   | Not supported                                     | Implement `SourceAdapter` for `db.trigger(...)`   |
+| Runtime-native binding registration     | Yes (via Functions host extension)                | No — Python decorator wrapper                     |
+| Trigger mechanism                       | SQL Change Tracking                               | Cursor-column polling on a timer trigger          |
+| Scaling integration                     | Functions extension scale controller              | Driven by your timer trigger schedule             |
+| Delivery guarantee                      | Per official docs                                 | At-least-once (handlers must be idempotent)       |
+| Checkpoint storage                      | Managed by extension                              | Azure Blob Storage (`BlobCheckpointStore`)        |
 
 ## Choose your integration path
 
@@ -117,15 +154,17 @@ azure-functions-db[postgres]
 
 | Need | Decorator | Mode |
 |------|-----------|------|
-| Read data into handler | `input` | Declarative (data injection) |
-| Write data to DB | `output` | Declarative (data injection) |
-| Complex reads (multiple queries) | `inject_reader` | Imperative (client injection) |
-| Complex writes (transactions) | `inject_writer` | Imperative (client injection) |
-| React to DB changes | `trigger` | Event-driven (pseudo-trigger) |
+| Read data into handler | `input` | Input-style data injection |
+| Write data to DB | `output` | Output-style writer injection |
+| Complex reads (multiple queries) | `inject_reader` | Imperative client injection |
+| Complex writes (transactions) | `inject_writer` | Imperative client injection |
+| React to DB changes | `trigger` | Poll-based pseudo trigger |
 
-### Input Binding (data injection)
+> All decorators are Python function wrappers. They are **not** registered as native Azure Functions bindings with the host.
 
-`input` injects the actual query result into your handler — no client needed.
+### Input-style data injection
+
+`@db.input` injects the actual query result into your handler — no client needed.
 
 **Row lookup mode** — fetch a single row by primary key:
 
@@ -159,9 +198,9 @@ def list_active_users(users: list[dict]) -> None:
         print(user["email"])
 ```
 
-### Output Binding (data injection)
+### Output-style writer injection
 
-`output` injects a `DbOut` instance into your handler — call `.set()` to write explicitly.
+`@db.output` injects a `DbOut` instance into your handler — call `.set()` to write explicitly.
 
 ```python
 from azure_functions_db import DbBindings, DbOut
@@ -201,9 +240,9 @@ def create_order(req: func.HttpRequest, out: DbOut) -> func.HttpResponse:
 
 Supported upsert dialects: PostgreSQL, SQLite, MySQL.
 
-### Client Injection (imperative escape hatches)
+### Client injection (imperative escape hatches)
 
-For complex operations (multiple queries, transactions, update/delete), use `inject_reader`/`inject_writer` to get a client instance:
+For complex operations (multiple queries, transactions, update/delete), use `inject_reader` / `inject_writer` to receive a client instance:
 
 ```python
 from azure_functions_db import DbBindings, DbReader, DbWriter
@@ -222,7 +261,12 @@ def complex_write(writer: DbWriter) -> None:
     writer.delete(pk={"id": 1})
 ```
 
-### Trigger (change detection)
+### Trigger (poll-based pseudo trigger)
+
+> **This is a pseudo trigger, not a native Azure Functions trigger.**
+> `@db.trigger` does not register a binding with the Functions host. It must be stacked **on top of a real Azure Functions trigger** (typically `@app.schedule` / timer) that fires the polling loop.
+>
+> Delivery is **at-least-once**. Duplicates may occur during process crashes, lease transitions, or checkpoint commit failures. **Handlers must be idempotent.** See [Semantics — Duplicate Windows](docs/03-semantics.md#13-duplicate-and-reprocessing-windows).
 
 ```python
 import azure.functions as func
@@ -253,14 +297,13 @@ checkpoint_store = BlobCheckpointStore(
 @db.trigger(arg_name="events", source=source, checkpoint_store=checkpoint_store)
 def orders_poll(timer: func.TimerRequest, events: list[RowChange]) -> None:
     for event in events:
+        # Idempotent processing required: the same `event` may be delivered more than once.
         print(f"Order {event.pk}: {event.op}")
 ```
 
-> This is a **pseudo-trigger** — it requires an actual Azure Functions trigger (e.g. timer) to fire.
-
 > See [Python API Spec](docs/04-python-api-spec.md) for the full API reference.
 
-### Combined: Trigger + Binding
+### Combined: Trigger + writer injection
 
 Process database changes and write results to another table. Uses `EngineProvider` for shared connection pooling.
 
@@ -390,7 +433,13 @@ trigger = PollTrigger(
 
 ## Duplicate Handling
 
-This package provides **at-least-once** delivery. Duplicates may occur during process crashes, lease transitions, or commit failures. Handlers must be idempotent. See [Semantics — Duplicate Windows](docs/03-semantics.md#13-duplicate-and-reprocessing-windows) for details.
+This package provides **at-least-once** delivery for the polling trigger. Duplicates may occur during process crashes, lease transitions, or checkpoint commit failures. Handlers must be idempotent. Recommended patterns:
+
+- Use the row primary key (`event.pk`) plus `event.cursor` as a deduplication key in your sink.
+- Wrap downstream writes in a transaction with a unique constraint that you can swallow.
+- For batch writes, prefer upsert (`action="upsert"` with `conflict_columns=...`) over plain insert.
+
+See [Semantics — Duplicate Windows](docs/03-semantics.md#13-duplicate-and-reprocessing-windows) for the full guarantee model and the windows in which duplicates can be observed.
 
 ## Documentation
 
@@ -409,7 +458,7 @@ Part of the **Azure Functions Python DX Toolkit**:
 |---------|------|
 | [azure-functions-openapi-python](https://github.com/yeongseon/azure-functions-openapi-python) | OpenAPI spec generation and Swagger UI |
 | [azure-functions-validation-python](https://github.com/yeongseon/azure-functions-validation-python) | Request/response validation and serialization |
-| **azure-functions-db-python** | Database bindings for SQL, PostgreSQL, MySQL, SQLite, and Cosmos DB |
+| **azure-functions-db-python** | SQLAlchemy-powered DB integration helpers (poll-based pseudo trigger, input/output/client injection) |
 | [azure-functions-langgraph-python](https://github.com/yeongseon/azure-functions-langgraph-python) | LangGraph deployment adapter for Azure Functions |
 | [azure-functions-scaffold-python](https://github.com/yeongseon/azure-functions-scaffold-python) | Project scaffolding CLI |
 | [azure-functions-logging-python](https://github.com/yeongseon/azure-functions-logging-python) | Structured logging and observability |
