@@ -6,6 +6,7 @@ import threading
 from sqlalchemy.engine import Engine, create_engine
 
 from .config import DbConfig, resolve_env_vars
+from .errors import ConfigurationError
 
 
 class EngineProvider:
@@ -23,6 +24,14 @@ class EngineProvider:
             return engine
 
     def create_isolated_engine(self, config: DbConfig) -> Engine:
+        if "connect_args" in config.engine_kwargs:
+            msg = (
+                "Do not pass 'connect_args' inside engine_kwargs; "
+                "use DbConfig.connect_args instead. Mixing the two would "
+                "silently let engine_kwargs override DbConfig.connect_args."
+            )
+            raise ConfigurationError(msg)
+
         kwargs: dict[str, object] = {
             "pool_size": config.pool_size,
             "pool_recycle": config.pool_recycle,

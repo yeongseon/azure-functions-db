@@ -187,6 +187,20 @@ class TestEngineProvider:
         assert engine_a is not engine_b
         provider.dispose_all()
 
+    def test_connect_args_inside_engine_kwargs_raises(self, tmp_path: Path) -> None:
+        from azure_functions_db.core.errors import ConfigurationError
+
+        url = _create_orders_db(tmp_path / "kwargs_conflict.db")
+        provider = EngineProvider()
+        config = DbConfig(
+            connection_url=url,
+            connect_args={"timeout": 5},
+            engine_kwargs={"connect_args": {"timeout": 30}},
+        )
+
+        with pytest.raises(ConfigurationError, match="connect_args"):
+            provider.get_engine(config)
+
 
 class TestSerializers:
     def test_serialize_cursor_part_datetime(self) -> None:
