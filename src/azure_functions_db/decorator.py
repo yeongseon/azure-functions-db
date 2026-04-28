@@ -228,6 +228,30 @@ class _AsyncDbReaderProxy:
     ) -> list[dict[str, object]]:
         return await asyncio.to_thread(self._reader.query, sql, params=params)
 
+    async def scalar(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> object | None:
+        return await asyncio.to_thread(self._reader.scalar, sql, params=params)
+
+    async def one(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return await asyncio.to_thread(self._reader.one, sql, params=params)
+
+    async def one_or_none(
+        self,
+        sql: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        return await asyncio.to_thread(self._reader.one_or_none, sql, params=params)
+
     def close(self) -> None:
         self._reader.close()
 
