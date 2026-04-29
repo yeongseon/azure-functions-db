@@ -297,9 +297,13 @@ class DbWriter:
         commit/rollback. Rollback failures are logged at WARNING and do
         not prevent connection close or engine disposal.
 
-        After ``close()``, do not continue using the writer inside the
-        original ``transaction()`` block — start a new ``with`` block on
-        a fresh writer instance.
+        .. warning::
+            Do not continue using the same writer inside that
+            ``transaction()`` block after calling ``close()``. The writer
+            has been torn down and any further ``insert`` / ``upsert`` /
+            ``update`` / ``delete`` call will raise :class:`WriteError`.
+            If you need to keep writing, exit the ``with`` block first
+            and start a new ``transaction()`` on a fresh writer instance.
         """
         had_active_tx = self._tx is not None
         if self._tx is not None:
