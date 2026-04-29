@@ -430,7 +430,9 @@ This package does **not** use SQLAlchemy `AsyncEngine` internally. If you need f
 
 ## `engine_kwargs` flow-through
 
-Every binding decorator and `DbConfig` accept an `engine_kwargs` mapping that is forwarded to `sqlalchemy.create_engine`. Anything the underlying dialect supports — connection / query timeouts, pool sizing, isolation level, `connect_args`, custom event listeners — flows through unchanged. Use `EngineProvider` when several bindings should share a single engine instance with a consistent `engine_kwargs` configuration.
+Every binding decorator and `DbConfig` accept an `engine_kwargs` mapping that is forwarded to `sqlalchemy.create_engine`. Anything the underlying dialect supports — connection / query timeouts, pool sizing, isolation level, custom event listeners — flows through unchanged. Use `EngineProvider` when several bindings should share a single engine instance with a consistent `engine_kwargs` configuration.
+
+> **Note:** Pass driver-level `connect_args` via the dedicated `connect_args` parameter, **not** nested inside `engine_kwargs`. Nesting `connect_args` inside `engine_kwargs` raises `ConfigurationError` because `EngineProvider` already owns that argument and silently overriding it would mask user intent.
 
 > See [EngineProvider Lifecycle & SQLAlchemy Pooling Guidance](docs/25-engine-provider-pooling.md) for engine cache-key rules, recommended pool settings on Azure Functions (`pool_pre_ping`, `pool_recycle`, `pool_size` / `max_overflow`), per-dialect snippets, and SQLite test caveats.
 
