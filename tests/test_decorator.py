@@ -864,6 +864,104 @@ def test_inject_reader_async_proxy_query(tmp_path: Path) -> None:
     assert asyncio.run(handler()) == [{"id": 1, "name": "Alice"}, {"id": 3, "name": "Carol"}]
 
 
+def test_inject_reader_async_proxy_scalar(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "reader-async-scalar.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.scalar(
+            "SELECT COUNT(*) FROM users WHERE active = :active",
+            params={"active": 1},
+        )
+
+    assert asyncio.run(handler()) == 2
+
+
+def test_inject_reader_async_proxy_one(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "reader-async-one.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.one(
+            "SELECT id, name FROM users WHERE id = :id",
+            params={"id": 1},
+        )
+
+    assert asyncio.run(handler()) == {"id": 1, "name": "Alice"}
+
+
+def test_inject_reader_async_proxy_one_or_none_returns_row(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "reader-async-oon-some.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.one_or_none(
+            "SELECT id, name FROM users WHERE id = :id",
+            params={"id": 2},
+        )
+
+    assert asyncio.run(handler()) == {"id": 2, "name": "Bob"}
+
+
+def test_inject_reader_async_proxy_one_or_none_returns_none(tmp_path: Path) -> None:
+    url = _sqlite_url(tmp_path, "reader-async-oon-none.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.one_or_none(
+            "SELECT id, name FROM users WHERE id = :id",
+            params={"id": 9999},
+        )
+
+    assert asyncio.run(handler()) is None
+
+
+def test_inject_reader_async_proxy_one_raises_on_multiple_rows(tmp_path: Path) -> None:
+    from azure_functions_db.core.errors import QueryError
+
+    url = _sqlite_url(tmp_path, "reader-async-one-multi.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.one("SELECT id FROM users")
+
+    with pytest.raises(QueryError):
+        asyncio.run(handler())
+
+
+def test_inject_reader_async_proxy_one_or_none_raises_on_multiple_rows(tmp_path: Path) -> None:
+    from azure_functions_db.core.errors import QueryError
+
+    url = _sqlite_url(tmp_path, "reader-async-oon-multi.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.one_or_none("SELECT id FROM users")
+
+    with pytest.raises(QueryError):
+        asyncio.run(handler())
+
+
+def test_inject_reader_async_proxy_scalar_raises_on_multiple_rows(tmp_path: Path) -> None:
+    from azure_functions_db.core.errors import QueryError
+
+    url = _sqlite_url(tmp_path, "reader-async-scalar-multi.db")
+    _create_users_table_with_data(url)
+
+    @DbBindings().inject_reader("reader", url=url, table="users")
+    async def handler(reader: Any) -> Any:
+        return await reader.scalar("SELECT id FROM users")
+
+    with pytest.raises(QueryError):
+        asyncio.run(handler())
+
+
 # =====================================================================
 # inject_writer tests — client injection (imperative escape hatch)
 # =====================================================================
