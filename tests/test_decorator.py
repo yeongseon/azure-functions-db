@@ -712,9 +712,9 @@ def test_output_rejects_invalid_set_type(tmp_path: Path) -> None:
 
 
 def test_output_rejects_tuple_payload(tmp_path: Path) -> None:
-    # DbOut.set is typed as `dict | list[dict] | BaseModel | list[BaseModel] | None`.
-    # Tuples are not list, so the runtime must reject them — the type hint and
-    # the runtime branching agree.
+    # DbOut.set is statically typed with Sequence[...] for covariance,
+    # but the runtime contract intentionally accepts only list batches.
+    # Tuples are sequences but not list, so the runtime must reject them.
     url = _sqlite_url(tmp_path, "output-tuple.db")
     _create_orders_table(url)
 
