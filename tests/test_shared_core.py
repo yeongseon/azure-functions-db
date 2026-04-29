@@ -201,6 +201,38 @@ class TestEngineProvider:
         with pytest.raises(ConfigurationError, match="connect_args"):
             provider.get_engine(config)
 
+    def test_connect_args_in_engine_kwargs_alone_still_raises(self, tmp_path: Path) -> None:
+        from azure_functions_db.core.errors import ConfigurationError
+
+        url = _create_orders_db(tmp_path / "kwargs_alone.db")
+        provider = EngineProvider()
+        config = DbConfig(
+            connection_url=url,
+            engine_kwargs={"connect_args": {"timeout": 30}},
+        )
+
+        with pytest.raises(ConfigurationError, match="connect_args"):
+            provider.get_engine(config)
+
+    def test_connect_args_error_message_directs_to_dbconfig_connect_args(
+        self, tmp_path: Path
+    ) -> None:
+        from azure_functions_db.core.errors import ConfigurationError
+
+        url = _create_orders_db(tmp_path / "kwargs_msg.db")
+        provider = EngineProvider()
+        config = DbConfig(
+            connection_url=url,
+            engine_kwargs={"connect_args": {"timeout": 30}},
+        )
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            provider.get_engine(config)
+
+        message = str(exc_info.value)
+        assert "engine_kwargs" in message
+        assert "DbConfig.connect_args" in message
+
 
 class TestSerializers:
     def test_serialize_cursor_part_datetime(self) -> None:
