@@ -116,6 +116,8 @@ class DbWriter:
         try:
             yield self
         except BaseException:
+            if self._tx is None:
+                raise
             try:
                 tx.rollback()
             finally:
@@ -124,6 +126,8 @@ class DbWriter:
                 conn.close()
             raise
         else:
+            if self._tx is None:
+                return
             try:
                 tx.commit()
             except Exception as exc:
@@ -283,12 +287,12 @@ class DbWriter:
     def close(self) -> None:
         """Release resources held by this writer.
 
-        If a transaction is active (because ``close()`` was called inside
-        a ``transaction()`` block via abrupt teardown, or because the
-        caller forgot to exit the context manager), the transaction is
-        explicitly rolled back before the connection is released. A
-        rollback failure is logged but does not prevent connection close
-        or engine disposal.
+        Safe to call from inside a ``transaction()`` ``with`` block: any
+        active transaction is rolled back, the connection is released,
+        and when the surrounding ``with`` block exits the writer detects
+        that teardown already happened and skips the commit/rollback.
+        Rollback failures are logged at WARNING and do not prevent
+        connection close or engine disposal.
         """
         if self._tx is not None:
             tx = self._tx
