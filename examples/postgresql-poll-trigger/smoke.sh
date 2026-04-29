@@ -9,7 +9,12 @@
 # process); instead it drives a single poll tick from Python so the
 # script stays self-contained and CI-friendly.
 #
+# Requires Docker Compose v2 (`docker compose ...`, not `docker-compose`)
+# because we rely on `--format json` and `up --wait`.
+#
 # Exits non-zero on any failure with a message identifying the step.
+# Always tears down docker resources and the temporary venv on exit,
+# even if a step fails.
 
 set -euo pipefail
 
@@ -22,24 +27,32 @@ readonly CONTAINER_NAME="db-state"
 log() { printf '\n[smoke] %s\n' "$*"; }
 fail() { printf '\n[smoke][FAIL] %s\n' "$*" >&2; exit 1; }
 
+cleanup() {
+    local rc=$?
+    log "cleanup (exit=${rc})"
+    (cd "${EXAMPLE_DIR}" && docker compose down -v >/dev/null 2>&1) || true
+    rm -rf "${EXAMPLE_DIR}/.smoke-venv"
+    exit "${rc}"
+}
+trap cleanup EXIT
+
 cd "${EXAMPLE_DIR}"
 
 command -v docker >/dev/null || fail "docker is required"
 command -v psql >/dev/null || fail "psql is required (apt-get install postgresql-client)"
 command -v python3 >/dev/null || fail "python3 is required"
+docker compose version >/dev/null 2>&1 \
+    || fail "docker compose v2 is required (this script uses 'up --wait' and '--format json')"
 
-log "1/7 docker compose up"
-docker compose up -d || fail "docker compose up failed"
+log "1/7 docker compose up (waiting for healthchecks)"
+docker compose up -d --wait || fail "docker compose up --wait failed"
 
-log "2/7 wait for Postgres healthcheck"
-for _ in $(seq 1 30); do
-    if docker compose ps --format json postgres 2>/dev/null | grep -q '"Health":"healthy"'; then
-        break
-    fi
-    sleep 2
+log "2/7 verify Postgres and Azurite are healthy"
+for service in postgres azurite; do
+    docker compose ps --format json "${service}" 2>/dev/null \
+        | grep -q '"Health":"healthy"' \
+        || fail "${service} did not become healthy"
 done
-docker compose ps --format json postgres 2>/dev/null | grep -q '"Health":"healthy"' \
-    || fail "Postgres did not become healthy within 60s"
 
 log "3/7 apply schema"
 PGPASSWORD=app psql "postgresql://app:app@localhost:5432/app" -v ON_ERROR_STOP=1 \
@@ -73,6 +86,7 @@ CONTAINER_NAME="${CONTAINER_NAME}" \
 python3 - <<'PY'
 import os
 import sys
+from datetime import datetime, timezone
 
 from azure.storage.blob import ContainerClient
 from sqlalchemy import create_engine, text
@@ -113,13 +127,16 @@ dest_engine = create_engine(pg_url)
 def handle(events: list[RowChange]) -> None:
     if not events:
         return
+    processed_at = datetime.now(timezone.utc)
     rows = [
         {
             "order_id": e.pk["id"],
-            "source_cursor": e.cursor,
+            # event.cursor is (cursor_column, *pk_columns) — keep the timestamp.
+            "source_cursor": e.cursor[0],
             "customer_name": (e.after or {}).get("customer_name"),
             "amount": (e.after or {}).get("amount"),
             "status": (e.after or {}).get("status"),
+            "processed_at": processed_at,
         }
         for e in events
         if e.after is not None
@@ -129,8 +146,9 @@ def handle(events: list[RowChange]) -> None:
             conn.execute(
                 text(
                     "INSERT INTO processed_orders "
-                    "(order_id, source_cursor, customer_name, amount, status) "
-                    "VALUES (:order_id, :source_cursor, :customer_name, :amount, :status) "
+                    "(order_id, source_cursor, customer_name, amount, status, processed_at) "
+                    "VALUES (:order_id, :source_cursor, :customer_name, :amount, :status, "
+                    ":processed_at) "
                     "ON CONFLICT (order_id, source_cursor) DO NOTHING"
                 ),
                 row,
@@ -142,8 +160,8 @@ trigger = PollTrigger(
     source=source,
     checkpoint_store=checkpoint_store,
 )
-batches = trigger.run(timer=None, handler=handle)
-print(f"[smoke] poll tick processed {batches} batch(es)")
+events_processed = trigger.run(timer=None, handler=handle)
+print(f"[smoke] poll tick processed {events_processed} event(s)")
 
 with dest_engine.begin() as conn:
     count = conn.execute(text("SELECT COUNT(*) FROM processed_orders")).scalar_one()
@@ -164,8 +182,5 @@ print(f"[smoke] processed_orders rows: {count}")
 print(f"[smoke] checkpoint blobs: {[b.name for b in blobs]}")
 PY
 
-log "7/7 teardown"
-docker compose down -v >/dev/null
-rm -rf .smoke-venv
-
+log "7/7 assertions passed (cleanup runs via EXIT trap)"
 log "OK — smoke test passed"
