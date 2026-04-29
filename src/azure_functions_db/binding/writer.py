@@ -7,6 +7,7 @@ from types import TracebackType
 from typing import Any
 
 from sqlalchemy.engine import Connection, Engine, create_engine
+from sqlalchemy.engine.base import Transaction
 from sqlalchemy.schema import Table
 from sqlalchemy.sql import and_, delete, update
 
@@ -65,6 +66,8 @@ class DbWriter:
         self._owns_engine = False
         self._initialized = False
         self._tx_conn: Connection | None = None
+        self._closed_in_active_tx = False
+        self._tx: Transaction | None = None
 
     @contextmanager
     def transaction(self) -> Iterator[DbWriter]:
@@ -110,23 +113,32 @@ class DbWriter:
 
         tx = conn.begin()
         self._tx_conn = conn
+        self._tx = tx
+        self._closed_in_active_tx = False
         try:
             yield self
         except BaseException:
+            if self._tx is None:
+                raise
             try:
                 tx.rollback()
             finally:
+                self._tx = None
                 self._tx_conn = None
                 conn.close()
             raise
         else:
+            if self._tx is None:
+                return
             try:
                 tx.commit()
             except Exception as exc:
+                self._tx = None
                 self._tx_conn = None
                 conn.close()
                 msg = "Failed to commit transaction"
                 raise WriteError(msg) from exc
+            self._tx = None
             self._tx_conn = None
             conn.close()
 
@@ -275,7 +287,35 @@ class DbWriter:
             raise WriteError(msg) from exc
 
     def close(self) -> None:
-        """Release resources held by this writer."""
+        """Tear down resources held by this writer.
+
+        If called while a ``transaction()`` ``with`` block is still active,
+        the transaction is rolled back, the connection is released, and a
+        sentinel is set so that any subsequent write call inside the same
+        ``with`` block raises :class:`WriteError`. The surrounding context
+        manager's ``__exit__`` observes the teardown and skips its own
+        commit/rollback. Rollback failures are logged at WARNING and do
+        not prevent connection close or engine disposal.
+
+        .. warning::
+            Do not continue using the same writer inside that
+            ``transaction()`` block after calling ``close()``. The writer
+            has been torn down and any further ``insert`` / ``upsert`` /
+            ``update`` / ``delete`` call will raise :class:`WriteError`.
+            If you need to keep writing, exit the ``with`` block first
+            and start a new ``transaction()`` on a fresh writer instance.
+        """
+        had_active_tx = self._tx is not None
+        if self._tx is not None:
+            tx = self._tx
+            self._tx = None
+            try:
+                tx.rollback()
+            except Exception:
+                logger.warning(
+                    "Failed to roll back active transaction on writer.close()",
+                    exc_info=True,
+                )
         if self._tx_conn is not None:
             tx_conn = self._tx_conn
             self._tx_conn = None
@@ -293,6 +333,8 @@ class DbWriter:
             self._table = None
             self._initialized = False
             self._owns_engine = False
+        if had_active_tx:
+            self._closed_in_active_tx = True
 
     def __enter__(self) -> DbWriter:
         return self
@@ -328,6 +370,13 @@ class DbWriter:
             yield conn
 
     def _ensure_initialized(self) -> None:
+        if self._closed_in_active_tx:
+            msg = (
+                "DbWriter was close()d while a transaction() block was still "
+                "active; further writes inside that block are rejected. Exit "
+                "the transaction() block and use a fresh writer instance."
+            )
+            raise WriteError(msg)
         if self._initialized:
             return
 
